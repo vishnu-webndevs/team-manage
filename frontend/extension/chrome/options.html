@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>TeamManage Extension Options</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 16px; }
+      label { display:block; margin-top:12px; }
+      input { width: 100%; padding: 8px; }
+      button { margin-top: 16px; padding: 8px 12px; }
+    </style>
+  </head>
+  <body>
+    <h3>TeamManage Extension Settings</h3>
+    <label>API Base URL
+      <input id="apiBase" placeholder="http://localhost:8000/api" />
+    </label>
+    <label>Bearer Token
+      <input id="token" placeholder="Paste your API token" />
+    </label>
+    <label>Default Task ID
+      <input id="taskId" placeholder="123" />
+    </label>
+    <button id="save">Save</button>
+    <script>
+      const apiBaseEl = document.getElementById('apiBase');
+      const tokenEl = document.getElementById('token');
+      const taskEl = document.getElementById('taskId');
+      const saveBtn = document.getElementById('save');
+      chrome.storage.sync.get(['tm_api_base','tm_token','tm_task_id'], (res) => {
+        apiBaseEl.value = res.tm_api_base || 'http://localhost:8000/api';
+        tokenEl.value = res.tm_token || '';
+        taskEl.value = res.tm_task_id || '';
+      });
+      saveBtn.onclick = () => {
+        chrome.storage.sync.set({
+          tm_api_base: apiBaseEl.value,
+          tm_token: tokenEl.value,
+          tm_task_id: taskEl.value
+        }, () => alert('Saved'));
+      };
+    </script>
+  </body>
+  </html>
