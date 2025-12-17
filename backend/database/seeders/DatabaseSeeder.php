@@ -94,42 +94,39 @@ class DatabaseSeeder extends Seeder
 
         // Create sample users
         $user1 = User::create([
-            'name' => 'John Doe',
-            'email' => 'john@example.com',
+            'name' => 'Hitesh',
+            'email' => 'hitesh@example.com',
             'password' => bcrypt('password123'),
             'phone' => '+1234567890',
             'bio' => 'Admin',
         ]);
+        $user1->email_verified_at = now();
+        $user1->save();
 
         $user2 = User::create([
-            'name' => 'Jane Smith',
-            'email' => 'jane@example.com',
+            'name' => 'developer',
+            'email' => 'developer@example.com',
             'password' => bcrypt('password123'),
             'phone' => '+0987654321',
             'bio' => 'Project Manager',
         ]);
+        $user2->email_verified_at = now();
+        $user2->save();
 
         $user3 = User::create([
-            'name' => 'Bob Johnson',
-            'email' => 'bob@example.com',
-            'password' => bcrypt('password123'),
-            'phone' => '+1122334455',
-            'bio' => 'Developer',
-        ]);
-
-        $user4 = User::create([
-            'name' => 'Alice Williams',
-            'email' => 'alice@example.com',
+            'name' => 'Vishnu',
+            'email' => 'vishnu@example.com',
             'password' => bcrypt('password123'),
             'phone' => '+5544332211',
             'bio' => 'Employee',
         ]);
+        $user3->email_verified_at = now();
+        $user3->save();
 
         // Assign roles to users
         $user1->roles()->attach($adminRole);
         $user2->roles()->attach($projectManagerRole);
         $user3->roles()->attach($memberRole);
-        $user4->roles()->attach($memberRole);
 
         // Create sample teams
         $team1 = Team::create([
@@ -163,11 +160,6 @@ class DatabaseSeeder extends Seeder
             'role' => 'member',
         ]);
 
-        TeamMember::create([
-            'team_id' => $team1->id,
-            'user_id' => $user4->id,
-            'role' => 'member',
-        ]);
 
         TeamMember::create([
             'team_id' => $team2->id,
@@ -215,19 +207,8 @@ class DatabaseSeeder extends Seeder
             'due_date' => now()->addDays(3),
         ]);
 
-        $task2 = Task::create([
-            'project_id' => $project1->id,
-            'created_by' => $user2->id,
-            'assigned_to' => $user4->id,
-            'title' => 'Implement authentication',
-            'description' => 'Setup user authentication system',
-            'status' => 'todo',
-            'priority' => 'critical',
-            'estimated_hours' => 16,
-            'due_date' => now()->addDays(5),
-        ]);
 
-        $task3 = Task::create([
+        $task2 = Task::create([
             'project_id' => $project2->id,
             'created_by' => $user1->id,
             'assigned_to' => $user3->id,
