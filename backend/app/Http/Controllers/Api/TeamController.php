@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Team;
 use App\Models\TeamMember;
+use App\Models\Notification;
 use Illuminate\Http\Request;
 
 class TeamController extends Controller
@@ -95,6 +96,19 @@ class TeamController extends Controller
             ['team_id' => $team->id, 'user_id' => $validated['user_id']],
             ['role' => $validated['role']]
         );
+
+        // Notify user
+        if ($validated['user_id'] !== auth()->id()) {
+            Notification::create([
+                'user_id' => $validated['user_id'],
+                'type' => 'team_invitation',
+                'title' => 'Added to Team',
+                'message' => "You have been added to team '{$team->name}' as {$validated['role']}",
+                'link' => '/teams',
+                'notifiable_id' => $team->id,
+                'notifiable_type' => Team::class,
+            ]);
+        }
 
         return response()->json(['message' => 'Member added successfully']);
     }

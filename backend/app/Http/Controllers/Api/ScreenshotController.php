@@ -319,8 +319,9 @@ class ScreenshotController extends Controller
             ->get(['start_time', 'end_time', 'keyboard_clicks', 'mouse_clicks']);
 
         $buckets = [];
+        $minutes = max(1, (int) floor($end->diffInSeconds($start) / 60));
         $cursor = $start->copy()->startOfMinute();
-        while ($cursor->lte($end)) {
+        for ($i = 0; $i < $minutes; $i++) {
             $key = $cursor->format('H:i');
             $buckets[$key] = [
                 'time' => $key,

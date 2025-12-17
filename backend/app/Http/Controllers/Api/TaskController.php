@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Task;
+use App\Models\Notification;
 use App\Models\TaskLog;
 use App\Models\Screenshot;
 use App\Models\ActivitySession;
@@ -86,6 +87,18 @@ class TaskController extends Controller
         }
         $task = Task::create($payload);
 
+        if ($task->assigned_to && $task->assigned_to !== auth()->id()) {
+            Notification::create([
+                'user_id' => $task->assigned_to,
+                'type' => 'task_assigned',
+                'title' => 'New Task Assigned',
+                'message' => 'You have been assigned a new task: ' . $task->title,
+                'link' => '/tasks',
+                'notifiable_id' => $task->id,
+                'notifiable_type' => Task::class,
+            ]);
+        }
+
         return response()->json([
             'message' => 'Task created successfully',
             'task' => $task->load('project', 'creator', 'assignee'),
@@ -131,12 +144,55 @@ class TaskController extends Controller
             ]);
 
             $oldStatus = $task->status;
+            $oldAssignee = $task->assigned_to;
+
             if (!\Illuminate\Support\Facades\Schema::hasColumn('tasks', 'time_reset_policy')) {
                 unset($validated['time_reset_policy']);
             }
             $task->update($validated);
 
-            if ($oldStatus !== $validated['status']) {
+            // Notify on assignment change
+            if (isset($validated['assigned_to']) && $validated['assigned_to'] != $oldAssignee) {
+                if ($validated['assigned_to'] && $validated['assigned_to'] !== auth()->id()) {
+                    Notification::create([
+                        'user_id' => $validated['assigned_to'],
+                        'type' => 'task_assigned',
+                        'title' => 'Task Assigned',
+                        'message' => 'You have been assigned a task: ' . $task->title,
+                        'link' => '/tasks',
+                        'notifiable_id' => $task->id,
+                        'notifiable_type' => Task::class,
+                    ]);
+                }
+            }
+
+            if ($oldStatus !== $task->status) {
+                // Notify creator
+                if (auth()->id() !== $task->created_by) {
+                    Notification::create([
+                        'user_id' => $task->created_by,
+                        'type' => 'task_status_updated',
+                        'title' => 'Task Status Updated',
+                        'message' => "Task '{$task->title}' status changed to {$task->status}",
+                        'link' => '/tasks',
+                        'notifiable_id' => $task->id,
+                        'notifiable_type' => Task::class,
+                    ]);
+                }
+
+                // Notify assignee (if not the one who changed it)
+                if ($task->assigned_to && auth()->id() !== $task->assigned_to) {
+                    Notification::create([
+                        'user_id' => $task->assigned_to,
+                        'type' => 'task_status_updated',
+                        'title' => 'Task Status Updated',
+                        'message' => "Task '{$task->title}' status changed to {$task->status}",
+                        'link' => '/tasks',
+                        'notifiable_id' => $task->id,
+                        'notifiable_type' => Task::class,
+                    ]);
+                }
+
                 if (Schema::hasTable('task_logs')) {
                     TaskLog::create([
                         'user_id' => auth()->id(),
@@ -162,6 +218,17 @@ class TaskController extends Controller
             $oldStatus = $task->status;
             $task->update(['status' => $validated['status']]);
             if ($oldStatus !== $validated['status']) {
+                // Notify creator
+                Notification::create([
+                    'user_id' => $task->created_by,
+                    'type' => 'task_status_updated',
+                    'title' => 'Task Status Updated',
+                    'message' => "Task '{$task->title}' status changed to {$validated['status']} by assignee",
+                    'link' => '/tasks',
+                    'notifiable_id' => $task->id,
+                    'notifiable_type' => Task::class,
+                ]);
+
                 if (Schema::hasTable('task_logs')) {
                     TaskLog::create([
                         'user_id' => auth()->id(),

@@ -20,22 +20,18 @@ Route::get('/register', function () {
     abort(404);
 })->name('register');
 
-// Route to serve screenshots with proper CORS headers
-Route::get('/storage/screenshots/{filename}', function ($filename) {
-    // Check if file exists
-    $path = 'public/screenshots/' . $filename;
-    
-    if (!Storage::exists($path)) {
+// Generic route to serve files from public storage with CORS, including nested paths
+Route::get('/storage/{path}', function ($path) {
+    $storagePath = 'public/' . ltrim($path, '/');
+    if (!Storage::exists($storagePath)) {
         abort(404);
     }
-    
-    $file = Storage::get($path);
-    $mimeType = Storage::mimeType($path);
-    
+    $file = Storage::get($storagePath);
+    $mimeType = Storage::mimeType($storagePath) ?: 'application/octet-stream';
     return response($file, 200)
         ->header('Content-Type', $mimeType)
-        ->header('Access-Control-Allow-Origin', 'http://localhost:3000')
+        ->header('Access-Control-Allow-Origin', env('FRONTEND_URL', 'http://localhost:3000'))
         ->header('Access-Control-Allow-Methods', 'GET, OPTIONS')
         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
         ->header('Cache-Control', 'public, max-age=31536000');
-})->name('screenshots.serve');
+})->where('path', '.*')->name('storage.serve');

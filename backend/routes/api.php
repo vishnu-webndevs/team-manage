@@ -16,6 +16,9 @@ use App\Http\Controllers\Api\ActivitySessionController;
 // Public routes
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login']);
+Route::get('/auth/google', [AuthController::class, 'redirectToGoogle']);
+Route::get('/auth/google/callback', [AuthController::class, 'handleGoogleCallback']);
+Route::get('/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])->name('verification.verify');
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
@@ -23,6 +26,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::put('/auth/me', [AuthController::class, 'updateMe']);
+    Route::post('/email/resend', [AuthController::class, 'resendVerificationEmail']);
     Route::get('/users', [AuthController::class, 'getAllUsers']);
 
     // Teams
