@@ -34,6 +34,8 @@ export const Tasks = () => {
     const [error, setError] = useState('');
     const [reassignTaskId, setReassignTaskId] = useState(null);
     const [reassignMemberId, setReassignMemberId] = useState('');
+    const [showReassignModal, setShowReassignModal] = useState(false);
+    const [reassignTask, setReassignTask] = useState(null);
     const [editingTaskId, setEditingTaskId] = useState(null);
     const [editData, setEditData] = useState({
         title: '',
@@ -255,6 +257,27 @@ export const Tasks = () => {
             fetchTasks();
         } catch (err) {
             alert(err.response?.data?.message || 'Failed to delete task');
+        }
+    };
+
+    const openReassign = (task) => {
+        setReassignTask(task);
+        setReassignMemberId(task?.assignee?.id ? String(task.assignee.id) : '');
+        setShowReassignModal(true);
+    };
+    const closeReassign = () => {
+        setShowReassignModal(false);
+        setReassignTask(null);
+        setReassignMemberId('');
+    };
+    const handleConfirmReassign = async () => {
+        if (!reassignTask?.id || !reassignMemberId) return;
+        try {
+            await taskService.assignTask(reassignTask.id, parseInt(reassignMemberId));
+            closeReassign();
+            fetchTasks();
+        } catch (error) {
+            alert(error.response?.data?.message || 'Failed to assign task');
         }
     };
 
@@ -489,6 +512,9 @@ export const Tasks = () => {
                                             </div>
                                             <div className="card-actions">
                                                 <button className="btn-small" onClick={() => navigate(`/tasks/${task.id}/tracker`, { state: { task } })}>View</button>
+                                                {isAdminOrPM() && (
+                                                    <button className="btn-small" onClick={() => openReassign(task)}>Reassign</button>
+                                                )}
                                                 <button className="btn-small" onClick={() => startEditing(task)}>Edit</button>
                                                 {(isAdminOrPM() || (task.creator && user && task.creator.id === user.id)) && (
                                                     <button className="btn-small" onClick={() => handleDeleteTask(task.id)}>Delete</button>
@@ -543,69 +569,28 @@ export const Tasks = () => {
                             </div>
                             {(isAdminOrPM() || (task.creator && user && task.creator.id === user.id)) && (
                                 <div className="task-actions">
-                                    {reassignTaskId === task.id ? (
-                                        <div className="reassign-inline">
-                                            <select
-                                                value={reassignMemberId}
-                                                onChange={(e) => setReassignMemberId(e.target.value)}
-                                            >
-                                                <option value="">Select employee</option>
-                                                {members.map((member) => (
-                                                    <option key={member.id} value={member.id}>{member.name}</option>
-                                                ))}
-                                            </select>
+                                    <>
+                                        {isAdminOrPM() && (
                                             <button
                                                 className="btn-small"
-                                                onClick={() => {
-                                                    if (!reassignMemberId) return;
-                                                    taskService.assignTask(task.id, parseInt(reassignMemberId))
-                                                        .then(() => {
-                                                            setReassignTaskId(null);
-                                                            setReassignMemberId('');
-                                                            fetchTasks();
-                                                        })
-                                                        .catch((error) => {
-                                                            alert(error.response?.data?.message || 'Failed to assign task');
-                                                        });
-                                                }}
+                                                onClick={() => openReassign(task)}
                                             >
-                                                Save
+                                                Reassign
                                             </button>
-                                            <button
-                                                className="btn-small"
-                                                onClick={() => {
-                                                    setReassignTaskId(null);
-                                                    setReassignMemberId('');
-                                                }}
-                                            >
-                                                Cancel
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            {isAdminOrPM() && (
-                                                <button
-                                                    className="btn-small"
-                                                    onClick={() => setReassignTaskId(task.id)}
-                                                >
-                                                    Reassign
-                                                </button>
-                                            )}
-                                            <button
-                                                className="btn-small"
-                                                onClick={() => startEditing(task)}
-                                            >
-                                                Edit
-                                            </button>
-                                            <button
-                                                className="btn-small"
-                                                onClick={() => handleDeleteTask(task.id)}
-                                            >
-                                                Delete
-                                            </button>
-                                        </>
-                                    )}
-                                    
+                                        )}
+                                        <button
+                                            className="btn-small"
+                                            onClick={() => startEditing(task)}
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            className="btn-small"
+                                            onClick={() => handleDeleteTask(task.id)}
+                                        >
+                                            Delete
+                                        </button>
+                                    </>
                                 </div>
                             )}
                         </div>
@@ -834,6 +819,47 @@ export const Tasks = () => {
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {showReassignModal && (
+                <div className="modal-overlay" onClick={closeReassign}>
+                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>Reassign Task</h3>
+                            <button className="modal-close" onClick={closeReassign}>✕</button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="form-group">
+                                <label>Task</label>
+                                <div style={{ fontWeight: 600 }}>{reassignTask?.title || '-'}</div>
+                            </div>
+                            <div className="form-group">
+                                <label>Select employee</label>
+                                <select
+                                    value={reassignMemberId}
+                                    onChange={(e) => setReassignMemberId(e.target.value)}
+                                >
+                                    <option value="">Select employee</option>
+                                    {members.map((member) => (
+                                        <option key={member.id} value={member.id}>{member.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="modal-actions">
+                                <button
+                                    type="button"
+                                    className="modal-btn save-btn"
+                                    onClick={handleConfirmReassign}
+                                    disabled={!reassignMemberId}
+                                >
+                                    Save
+                                </button>
+                                <button type="button" className="modal-btn close-btn" onClick={closeReassign}>
+                                    Cancel
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

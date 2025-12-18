@@ -93,6 +93,10 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const refreshUser = async () => {
+        await fetchUser();
+    };
+
     return (
         <AuthContext.Provider
             value={{
@@ -105,6 +109,7 @@ export const AuthProvider = ({ children }) => {
                 logout,
                 hasRole,
                 isAdminOrPM,
+                refreshUser,
             }}
         >
             {children}

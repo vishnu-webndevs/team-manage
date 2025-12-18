@@ -11,6 +11,7 @@ export const authService = {
     },
     getUsers: () => api.get('/users'),
     updateMe: (data) => api.put('/auth/me', data),
+    changePassword: (data) => api.post('/auth/change-password', data),
 };
 
 export const teamService = {

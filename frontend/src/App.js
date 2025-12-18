@@ -18,6 +18,7 @@ import TaskTrackerPage from './pages/TaskTrackerPage';
 import TrackerMonitorPage from './pages/TrackerMonitorPage';
 import ScreenshotsManager from './pages/ScreenshotsManager';
 import Notifications from './pages/Notifications';
+import Profile from './pages/Profile';
 
 import './styles/index.css';
 
@@ -124,6 +125,14 @@ function AppRoutes() {
             element={
               <Layout>
                 <Notifications />
+              </Layout>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <Layout>
+                <Profile />
               </Layout>
             }
           />

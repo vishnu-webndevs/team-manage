@@ -74,12 +74,15 @@ const Layout = ({ children }) => {
                     <Link to="/notifications">Notifications</Link>
                     {isAdminOrPM() && <Link to="/monitor">Monitor</Link>}
                     <div className="nav-user-drawer">
-                        <span>{user?.name}</span>
+                        <Link to="/profile" onClick={(e) => e.stopPropagation()}>{user?.name}</Link>
                         <button onClick={(e) => { e.stopPropagation(); handleLogout(); }}>Logout</button>
                     </div>
                 </div>
                 <div className="nav-user">
-                    <span>{user?.name}</span>
+                    <Link to="/profile" className="nav-user-link">
+                        <span className="nav-avatar">{(user?.name || '?').charAt(0).toUpperCase()}</span>
+                        <span className="nav-username">{user?.name}</span>
+                    </Link>
                     <button onClick={handleLogout}>Logout</button>
                 </div>
             </nav>

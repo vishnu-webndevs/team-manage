@@ -13,6 +13,9 @@ const TaskTrackerPage = () => {
   const [estimatedHours, setEstimatedHours] = useState(0);
   const [trackedSeconds, setTrackedSeconds] = useState(0);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
+  const [trackedPeriod, setTrackedPeriod] = useState('total');
+  const [trackedStart, setTrackedStart] = useState(null);
+  const [trackedEnd, setTrackedEnd] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const [taskName, setTaskName] = useState('');
   const [projectName, setProjectName] = useState('');
@@ -43,13 +46,16 @@ const TaskTrackerPage = () => {
         setTaskName(t.title || t.name || 'Unknown Task');
         setProjectName(t.project?.name || 'Unknown Project');
         setDueDate(t.due_date || null);
-        const ttRes = await timeTrackService.getTimeTracks({ task_id: taskId });
-        const list = ttRes.data?.data || [];
-        const sum = list.reduce((acc, it) => acc + (it.duration_seconds || 0), 0);
-        setTrackedSeconds(sum);
         try {
           const remRes = await timeTrackService.getRemaining(parseInt(taskId));
-          setRemainingSeconds(remRes.data?.remaining_seconds ?? 0);
+          const trackedFromServer = Math.max(0, Number(remRes.data?.tracked_seconds ?? 0));
+          const remainingFromServer = Math.max(0, Number(remRes.data?.remaining_seconds ?? 0));
+          const periodFromServer = String(remRes.data?.period || 'total');
+          setTrackedSeconds(trackedFromServer);
+          setRemainingSeconds(remainingFromServer);
+          setTrackedPeriod(periodFromServer);
+          setTrackedStart(remRes.data?.start || null);
+          setTrackedEnd(remRes.data?.end || null);
         } catch {}
       } catch (e) {
         console.error('Error fetching progress', e);
@@ -175,55 +181,105 @@ const TaskTrackerPage = () => {
     const seconds = timeInSeconds % 60;
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   };
+  const formatHhMm = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return `${h}h ${m}m`;
+  };
+  const isOverCap = estimatedHours && trackedSeconds >= estimatedHours * 3600;
 
   return (
-    <div>
-      <h1>Task Screen Tracker</h1>
-      <p>Task ID: {taskId}</p>
-      <p>
-        Tracked: {Math.floor(trackedSeconds / 3600)}h {Math.floor((trackedSeconds % 3600) / 60)}m
-        {estimatedHours ? ` / ${estimatedHours}h` : ''}
-      </p>
-      <div>
-        <p>Time: {formatTime(time)}</p>
-        {!isTracking ? (
-          <button onClick={handleStartTracking} disabled={estimatedHours && trackedSeconds >= estimatedHours * 3600}>Start Tracking</button>
-        ) : (
-          <button onClick={handleStopTracking}>Stop Tracking</button>
-        )}
+    <div className="page-container">
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="profile-avatar">{(projectName || 'P').charAt(0).toUpperCase()}</div>
+              <div>
+                <div className="profile-name">{taskName}</div>
+                <div className="profile-email">{projectName} • Task #{taskId}{dueDate ? ` • Due ${new Date(dueDate).toLocaleDateString()}` : ''}</div>
+              </div>
+            </div>
+            {isOverCap && <div className="error-message" style={{ margin: 0, padding: '0.5rem 0.75rem' }}>Time limit reached</div>}
+          </div>
+        </div>
+        <div className="card-body">
+          <div className="stat-row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div className="stat-chip">Estimated: {estimatedHours || 0}h</div>
+            <div className="stat-chip">Tracked{trackedPeriod === 'week' ? ' (week)' : ''}: {formatHhMm(trackedSeconds)}</div>
+            <div className="stat-chip">Remaining: {formatHhMm(Math.max(0, remainingSeconds || 0))}</div>
+          </div>
+          {trackedPeriod === 'week' && (trackedStart || trackedEnd) && (
+            <div style={{ marginTop: 6, color: '#6b7280' }}>
+              This week: {trackedStart || '—'} to {trackedEnd || '—'}
+            </div>
+          )}
+        </div>
       </div>
-      <div>
-        <h2>Screenshots</h2>
-        <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-          {screenshots.map((screenshot) => (
-            <div key={screenshot.id} style={{ margin: '10px' }}>
-              <img
-                src={getStorageUrl(screenshot.image_path)}
-                alt={`Screenshot ${screenshot.id}`}
-                style={{ width: '200px', height: 'auto', border: '1px solid #ccc' }}
-              />
-              <p>Mouse: {screenshot.mouse_clicks ?? 0}</p>
-              <p>Keyboard: {screenshot.keyboard_clicks ?? 0}</p>
-              <p>{new Date(screenshot.created_at).toLocaleString()}</p>
-              <button onClick={() => setExpandedId(expandedId === screenshot.id ? null : screenshot.id)}>
-                {expandedId === screenshot.id ? 'Hide Activity' : 'Show Activity'}
-              </button>
-              {expandedId === screenshot.id && Array.isArray(screenshot.minute_breakdown) && (
-                <div style={{ marginTop: '8px', borderTop: '1px solid #eee', paddingTop: '8px' }}>
-                  <div style={{ fontWeight: 600 }}>Minute Activity</div>
-                  {screenshot.minute_breakdown.map((m, idx) => (
-                    <div key={idx} style={{ fontSize: '0.9rem', margin: '4px 0' }}>
-                      <span>{m.time} — </span>
-                      <span>Keys: {m.keyboard_clicks || 0}, Clicks: {m.mouse_clicks || 0}, Moves: {m.mouse_movements || 0}</span>
-                      {m.url ? (
-                        <span> — <a href={m.url} target="_blank" rel="noreferrer">{m.title || m.url}</a></span>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
+
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div className="card-body">
+          <div className="section-title">Timer</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div className="timer-display">{formatTime(time)}</div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              {!isTracking ? (
+                <button className="btn-primary" onClick={handleStartTracking} disabled={isOverCap}>Start Tracking</button>
+              ) : (
+                <button className="btn-stop" onClick={handleStopTracking}>Stop Tracking</button>
+              )}
+              {isTracking && (
+                <button className="btn-secondary" onClick={() => captureNow(parseInt(taskId), taskName || 'Unknown Task', projectName || 'Unknown Project')}>
+                  Capture Now
+                </button>
               )}
             </div>
-          ))}
+          </div>
+          <div style={{ marginTop: 8, color: '#6b7280' }}>Screenshots: first at 1 min, then every 10 min</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-body">
+          <div className="section-title">Screenshots</div>
+          <div className="grid">
+            {screenshots.map((screenshot) => (
+              <div key={screenshot.id} className="screenshot-card">
+                <img
+                  className="screenshot-img"
+                  src={getStorageUrl(screenshot.image_path)}
+                  alt={`Screenshot ${screenshot.id}`}
+                />
+                <div className="screenshot-meta">
+                  <div className="stat-chip">Mouse: {screenshot.mouse_clicks ?? 0}</div>
+                  <div className="stat-chip">Keys: {screenshot.keyboard_clicks ?? 0}</div>
+                  <div className="stat-chip">{new Date(screenshot.created_at).toLocaleString()}</div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => setExpandedId(expandedId === screenshot.id ? null : screenshot.id)}
+                  >
+                    {expandedId === screenshot.id ? 'Hide Activity' : 'Show Activity'}
+                  </button>
+                </div>
+                {expandedId === screenshot.id && Array.isArray(screenshot.minute_breakdown) && (
+                  <div className="activity-list">
+                    <div className="section-title" style={{ marginBottom: 6 }}>Minute Activity</div>
+                    {screenshot.minute_breakdown.map((m, idx) => (
+                      <div key={idx} className="activity-item">
+                        <span className="activity-time">{m.time}</span>
+                        <span className="activity-stats">Keys {m.keyboard_clicks || 0} • Clicks {m.mouse_clicks || 0} • Moves {m.mouse_movements || 0}</span>
+                        {m.url ? (
+                          <a className="activity-link" href={m.url} target="_blank" rel="noreferrer">{m.title || m.url}</a>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

@@ -164,11 +164,154 @@ button {
     border: 1px solid #f5c6cb;
 }
 
+.success-message {
+    background-color: #d4edda;
+    color: #155724;
+    padding: 1rem;
+    border-radius: 4px;
+    margin-top: 0.75rem;
+    border: 1px solid #c3e6cb;
+}
+
 .form-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 1rem;
 }
+
+.page-container {
+    padding: 0 1rem;
+}
+
+.card {
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+}
+.card-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.card-body {
+    padding: 1.25rem;
+}
+.section-title {
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 0.75rem;
+}
+
+.btn-secondary {
+    background-color: #764ba2;
+    color: #fff;
+}
+.btn-secondary:hover {
+    background-color: #5f3a86;
+}
+
+.profile-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.profile-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1rem;
+}
+.profile-meta { display: flex; flex-direction: column; }
+.profile-name { font-weight: 700; color: #2c3e50; }
+.profile-email { color: #6b7280; font-size: 0.9rem; }
+
+.stat-chip {
+    display: inline-block;
+    background: rgba(102,126,234,0.12);
+    color: #2c3e50;
+    border: 1px solid rgba(102,126,234,0.25);
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.9rem;
+}
+
+.timer-display {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.25);
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+}
+
+.screenshot-card {
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+}
+
+.screenshot-img {
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    border: 1px solid rgba(0,0,0,0.06);
+}
+
+.screenshot-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.activity-list {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(0,0,0,0.06);
+    display: grid;
+    gap: 6px;
+}
+.activity-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.9rem;
+}
+.activity-time {
+    font-weight: 600;
+    color: #374151;
+}
+.activity-stats {
+    color: #6b7280;
+}
+.activity-link {
+    color: #667eea;
+    text-decoration: none;
+}
+.activity-link:hover { text-decoration: underline; }
 
 @media (max-width: 768px) {
     .navbar {

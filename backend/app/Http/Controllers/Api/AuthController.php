@@ -59,15 +59,19 @@ class AuthController extends Controller
             'password' => Hash::make($validated['password']),
         ]);
 
-        event(new Registered($user));
-        $user->sendEmailVerificationNotification();
+        // Auto-verify email without sending notification
+        $user->email_verified_at = now();
+        $user->save();
+
+        // event(new Registered($user));
+        // $user->sendEmailVerificationNotification();
 
         $token = $user->createToken('api-token')->plainTextToken;
 
         $user->load('roles');
 
         return response()->json([
-            'message' => 'User registered successfully. Please verify your email.',
+            'message' => 'User registered successfully.',
             'user' => $user,
             'token' => $token,
         ], 201);
@@ -86,9 +90,10 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid credentials'], 401);
         }
 
-        if (!$user->hasVerifiedEmail()) {
-            return response()->json(['message' => 'Email not verified.'], 403);
-        }
+        // Email verification check disabled
+        // if (!$user->hasVerifiedEmail()) {
+        //     return response()->json(['message' => 'Email not verified.'], 403);
+        // }
 
         $token = $user->createToken('api-token')->plainTextToken;
 
@@ -103,12 +108,15 @@ class AuthController extends Controller
 
     public function redirectToGoogle()
     {
-        $url = Socialite::driver('google')->stateless()->redirect()->getTargetUrl();
-        return response()->json(['url' => $url]);
+        return response()->json(['message' => 'Google login is disabled.'], 404);
+        // $url = Socialite::driver('google')->stateless()->redirect()->getTargetUrl();
+        // return response()->json(['url' => $url]);
     }
 
     public function handleGoogleCallback()
     {
+        return response()->json(['message' => 'Google login is disabled.'], 404);
+        /*
         try {
             $googleUser = Socialite::driver('google')->stateless()->user();
             
@@ -148,6 +156,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             return response()->json(['error' => 'Google login failed', 'message' => $e->getMessage()], 500);
         }
+        */
     }
 
     public function logout(Request $request)
@@ -170,13 +179,36 @@ class AuthController extends Controller
     {
         $user = $request->user();
         $validated = $request->validate([
+            'name' => 'nullable|string|max:255',
+            'email' => 'nullable|string|email|max:255|unique:users,email,' . $user->id,
             'bio' => 'nullable|string',
         ]);
+        if (array_key_exists('name', $validated)) {
+            $user->name = $validated['name'];
+        }
+        if (array_key_exists('email', $validated)) {
+            $user->email = $validated['email'];
+        }
         if (array_key_exists('bio', $validated)) {
             $user->bio = $validated['bio'];
         }
         $user->save();
         return response()->json($user->fresh());
+    }
+
+    public function changePassword(Request $request)
+    {
+        $user = $request->user();
+        $validated = $request->validate([
+            'old_password' => 'required|string',
+            'new_password' => 'required|string|min:8|confirmed',
+        ]);
+        if (!Hash::check($validated['old_password'], $user->password)) {
+            return response()->json(['message' => 'Old password incorrect'], 422);
+        }
+        $user->password = Hash::make($validated['new_password']);
+        $user->save();
+        return response()->json(['message' => 'Password changed successfully']);
     }
 
     public function getAllUsers(Request $request)

@@ -20,16 +20,6 @@ export const Register = () => {
         if (meta) meta.setAttribute('content', 'Create your Team Manage account to manage tasks and track time');
     }, []);
 
-    const handleGoogleLogin = async () => {
-        try {
-            const response = await api.get('/auth/google');
-            window.location.href = response.data.url;
-        } catch (error) {
-            console.error('Google login error:', error);
-            setError('Failed to initialize Google login');
-        }
-    };
-
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
@@ -106,20 +96,6 @@ export const Register = () => {
                         {loading ? 'Registering...' : 'Register'}
                     </button>
                 </form>
-
-                <div className="divider">
-                    <span>OR</span>
-                </div>
-
-                <button 
-                    type="button" 
-                    className="google-btn" 
-                    onClick={handleGoogleLogin}
-                    disabled={loading}
-                >
-                    <img src="https://www.google.com/favicon.ico" alt="Google" width="18" height="18" />
-                    Sign up with Google
-                </button>
 
                 <p>
                     Already have an account? <Link to="/login">Login here</Link>

@@ -34,6 +34,10 @@ class ActivityTracker {
     // Session Management
     this.lastSessionPostTs = 0;
     this.sessionPostCooldownMs = 10 * 60 * 1000; // 10 minutes (only used if not forced)
+    this.minSessionSeconds = 15; // client-side guard to avoid spam
+    this.isFlushing = false; // prevent concurrent flushes
+    this.lastFlushedStart = null; // ISO string of last flushed segment start
+    this.lastStateChangeTs = 0; // throttle visibility/blur-driven flushes
     
     // Debounce for clicks
     this.lastClickTime = 0;
@@ -51,11 +55,9 @@ class ActivityTracker {
     this.lastActivity = Date.now();
     this.minuteData.clear();
     this.currentMinute = this.getCurrentMinuteKey();
-    this.currentSecond = this.getCurrentSecondKey();
     
     // Initialize first minute
     this.initializeMinute(this.currentMinute);
-    this.initializeSecond(this.currentSecond);
     
     // Add global event listeners (capture phase for all events)
     document.addEventListener('keydown', this.handleKeyDown, true);
@@ -127,6 +129,7 @@ class ActivityTracker {
   // Unified Session Posting Logic
   async safePostSession(payload = {}) {
     if (!this.sessionStart) return;
+    if (this.isFlushing) return;
 
     const now = Date.now();
     // Chrome History Style: Only post if forced (URL/Title change, stop, blur) 
@@ -137,12 +140,17 @@ class ActivityTracker {
     }
 
     try {
+      this.isFlushing = true;
       const end = new Date();
       const start = this.sessionStart;
+      const startIso = start.toISOString();
+      if (payload.__force && this.lastFlushedStart && this.lastFlushedStart === startIso) {
+        return;
+      }
       const durationSeconds = Math.max(0, Math.round((end - start) / 1000));
       
       // Only post if meaningful duration
-      if (durationSeconds > 0) {
+      if (durationSeconds >= this.minSessionSeconds) {
         const data = {
           task_id: window.__ACTIVE_TASK_ID__ || window.__LAST_TASK_ID__ || null,
           app_name: 'browser',
@@ -163,6 +171,11 @@ class ActivityTracker {
       }
     } catch (e) {
       console.log('⚠️ Failed to flush session:', e?.message || e);
+    } finally {
+      try {
+        this.lastFlushedStart = this.sessionStart ? this.sessionStart.toISOString() : null;
+      } catch {}
+      this.isFlushing = false;
     }
 
     // Reset session start for the NEXT segment
@@ -237,6 +250,9 @@ class ActivityTracker {
   }
   
   async handleVisibilityChange() {
+    const now = Date.now();
+    if (now - this.lastStateChangeTs < 1500) return;
+    this.lastStateChangeTs = now;
     if (document.hidden) {
       // Tab hidden -> End session segment (was Browser)
       await this.safePostSession({ __force: true });
@@ -259,6 +275,9 @@ class ActivityTracker {
   
   async handleBlur() {
     this.isWindowFocused = false;
+    const now = Date.now();
+    if (now - this.lastStateChangeTs < 1500) return;
+    this.lastStateChangeTs = now;
     // Window blur -> End session segment
     await this.safePostSession({ __force: true });
   }
@@ -320,11 +339,6 @@ class ActivityTracker {
       this.initializeMinute(this.currentMinute);
       console.log(`⏰ Switched to minute: ${this.currentMinute}`);
     }
-    const newSecond = this.getCurrentSecondKey();
-    if (newSecond !== this.currentSecond) {
-      this.currentSecond = newSecond;
-      this.initializeSecond(this.currentSecond);
-    }
     // Always keep url/title up to date for the current minute
     const md = this.minuteData.get(this.currentMinute);
     if (md) {
@@ -361,10 +375,6 @@ class ActivityTracker {
       minuteData.url = window.location?.href || minuteData.url || '';
       minuteData.title = document?.title || minuteData.title || '';
     }
-    const secondData = this.secondData.get(this.currentSecond);
-    if (secondData) {
-      secondData.keyboard++;
-    }
     
     console.log(`⌨️ Key pressed: "${event.key}" (Total: ${this.keyboardClicks})`);
   }
@@ -393,10 +403,6 @@ class ActivityTracker {
       minuteData.url = window.location?.href || minuteData.url || '';
       minuteData.title = document?.title || minuteData.title || '';
     }
-    const secondData = this.secondData.get(this.currentSecond);
-    if (secondData) {
-      if (isPrimary || isAux) secondData.mouse++;
-    }
     
     console.log(`🖱️ Mouse event: ${event.type} (Total: ${this.mouseClicks})`);
   }
@@ -413,10 +419,6 @@ class ActivityTracker {
       const minuteData = this.minuteData.get(this.currentMinute);
       if (minuteData) {
         minuteData.movements++;
-      }
-      const secondData = this.secondData.get(this.currentSecond);
-      if (secondData) {
-        secondData.movements++;
       }
       this.lastMouseMove = now;
       
@@ -435,10 +437,6 @@ class ActivityTracker {
     if (minuteData) {
       minuteData.movements++;
     }
-    const secondData = this.secondData.get(this.currentSecond);
-    if (secondData) {
-      secondData.movements++;
-    }
   }
   
   recordExternalMovement() {
@@ -447,12 +445,10 @@ class ActivityTracker {
     if (now - this.lastMouseMove > 150) {
       this.updateCurrentMinute();
       this.lastActivity = now;
-      this.mouseMoveCount++;
-      const md = this.minuteData.get(this.currentMinute);
-      if (md) md.movements++;
-      const sd = this.secondData.get(this.currentSecond);
-      if (sd) sd.movements++;
-      this.lastMouseMove = now;
+    this.mouseMoveCount++;
+    const minuteData = this.minuteData.get(this.currentMinute);
+    if (minuteData) minuteData.movements++;
+    this.lastMouseMove = now;
     }
   }
   
@@ -463,8 +459,6 @@ class ActivityTracker {
     this.mouseClicks++;
     const md = this.minuteData.get(this.currentMinute);
     if (md) md.mouse++;
-    const sd = this.secondData.get(this.currentSecond);
-    if (sd) sd.mouse++;
   }
   
   recordExternalTyping() {
@@ -479,8 +473,6 @@ class ActivityTracker {
       md.url = window.location?.href || md.url || '';
       md.title = document?.title || md.title || '';
     }
-    const sd = this.secondData.get(this.currentSecond);
-    if (sd) sd.keyboard++;
   }
   
   getActivityData() {
@@ -501,7 +493,6 @@ class ActivityTracker {
     const boundedBreakdown = targetCount > 0 && minuteBreakdown.length > targetCount
       ? minuteBreakdown.slice(minuteBreakdown.length - targetCount)
       : minuteBreakdown;
-    const secondRates = this.getPerSecondRates();
     
     return {
       keyboard_clicks: this.keyboardClicks,
@@ -511,10 +502,7 @@ class ActivityTracker {
       activity_end_time: endTime.toISOString(),
       duration_minutes: Math.round(durationMinutes * 100) / 100,
       mouse_movements: this.mouseMoveCount,
-      minute_breakdown: boundedBreakdown,
-      keyboard_per_second: secondRates.keysPerSecond,
-      mouse_per_second: secondRates.clicksPerSecond,
-      movements_per_second: secondRates.movementsPerSecond
+      minute_breakdown: boundedBreakdown
     };
   }
   
@@ -572,11 +560,8 @@ class ActivityTracker {
     this.mouseClicks = 0;
     this.mouseMoveCount = 0;
     this.minuteData.clear();
-    this.secondData.clear();
     this.currentMinute = this.getCurrentMinuteKey();
-    this.currentSecond = this.getCurrentSecondKey();
     this.initializeMinute(this.currentMinute);
-    this.initializeSecond(this.currentSecond);
   }
 }
 

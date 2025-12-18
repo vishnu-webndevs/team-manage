@@ -25,16 +25,6 @@ export const Login = () => {
         }
     }, []);
 
-    const handleGoogleLogin = async () => {
-        try {
-            const response = await api.get('/auth/google');
-            window.location.href = response.data.url;
-        } catch (error) {
-            console.error('Google login error:', error);
-            setError('Failed to initialize Google login');
-        }
-    };
-
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
@@ -45,33 +35,7 @@ export const Login = () => {
             await login(email, password);
             navigate('/dashboard');
         } catch (err) {
-            if (err.response?.status === 403 && err.response?.data?.message === 'Email not verified.') {
-                setError(
-                    <div>
-                        Email not verified. <br />
-                        <button 
-                            type="button" 
-                            className="text-btn" 
-                            onClick={async () => {
-                                try {
-                                    // Login temporarily to send verification? No, we can't login.
-                                    // We need a way to resend verification without being logged in or login partially.
-                                    // Usually, we just tell them to check email.
-                                    // Or we can provide a resend endpoint that takes email.
-                                    // For now, simple message.
-                                    alert('Please check your email for the verification link.');
-                                } catch (e) {
-                                    alert('Failed to resend email');
-                                }
-                            }}
-                        >
-                            Check your inbox
-                        </button>
-                    </div>
-                );
-            } else {
-                setError(err.response?.data?.message || 'Login failed');
-            }
+            setError(err.response?.data?.message || 'Login failed');
         } finally {
             setLoading(false);
         }
@@ -109,20 +73,6 @@ export const Login = () => {
                         {loading ? 'Logging in...' : 'Login'}
                     </button>
                 </form>
-
-                <div className="divider">
-                    <span>OR</span>
-                </div>
-
-                <button 
-                    type="button" 
-                    className="google-btn" 
-                    onClick={handleGoogleLogin}
-                    disabled={loading}
-                >
-                    <img src="https://www.google.com/favicon.ico" alt="Google" width="18" height="18" />
-                    Login with Google
-                </button>
 
                 <p>
                     Don't have an account? <Link to="/register">Register here</Link>

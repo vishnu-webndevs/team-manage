@@ -1,5 +1,6 @@
 import html2canvas from 'html2canvas';
 import api, { getStorageBase } from './api';
+import { authService } from './index';
 import activityTracker from './activityTracker';
 
 let intervalId = null;
@@ -398,22 +399,6 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
         await api.post(`/screenshots`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
         console.log(`✅ REAL SCREEN capture successful: ${filename}`);
         showNotification('✅ REAL Screen Captured', `Screen + Activity captured: ${activityData.activity_percentage}% active`, 'success');
-        try {
-          const durationSeconds = Math.round((activityData.duration_minutes || 0) * 60);
-          await api.post('/activity-sessions', {
-            task_id: taskId,
-            app_name: 'screen',
-            window_title: document.title || '',
-            url: window.location?.href || '',
-            start_time: activityData.activity_start_time,
-            end_time: activityData.activity_end_time,
-            duration_seconds: durationSeconds,
-            keyboard_clicks: activityData.keyboard_clicks,
-            mouse_clicks: activityData.mouse_clicks,
-          });
-        } catch (e) {
-          console.log('⚠️ Failed to record activity session:', e?.message || e);
-        }
         activityTracker.resetTracking();
         return;
         
@@ -730,6 +715,18 @@ export const releaseScreenPermission = () => {
 };
 
 export const getScreenshots = async (taskId) => {
+  try {
+    const me = await authService.getCurrentUser();
+    const roles = Array.isArray(me?.roles) ? me.roles : [];
+    const isAdminOrPM = roles.some(r => r?.name === 'admin' || r?.name === 'project_manager');
+    if (isAdminOrPM) {
+      const params = new URLSearchParams();
+      params.append('task_id', String(taskId));
+      const res = await api.get(`/screenshots/all?${params.toString()}`);
+      const d = res.data;
+      return Array.isArray(d?.data) ? d.data : [];
+    }
+  } catch {}
   const response = await api.get(`/tasks/${taskId}/screenshots`);
   const d = response.data;
   return Array.isArray(d) ? d : (d?.data || []);

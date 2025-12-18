@@ -947,7 +947,7 @@ const TimeTracker = () => {
 
         <div className="timer-display">
                   <div className="time">{formatTime((isTracking && activeTimeTrack?.task_id && String(activeTimeTrack.task_id) === String(startForm.task_id)) ? time : 0)}</div>
-          {isTracking && (
+          {false && isTracking && (
             <div className="activity-display">
               <h4>🔍 Real-Time Activity</h4>
               <div className="activity-stats">
