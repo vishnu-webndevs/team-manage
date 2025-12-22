@@ -74,8 +74,8 @@ class ActivitySessionController extends Controller
         }
 
         $duration = $validated['duration_seconds'] ?? (strtotime($validated['end_time']) - strtotime($validated['start_time']));
-        $start = new \Carbon\Carbon($validated['start_time']);
-        $end = new \Carbon\Carbon($validated['end_time']);
+        $start = \Carbon\Carbon::parse($validated['start_time'])->setTimezone('Asia/Kolkata');
+        $end = \Carbon\Carbon::parse($validated['end_time'])->setTimezone('Asia/Kolkata');
         $validated['start_time'] = $start->format('Y-m-d H:i:s');
         $validated['end_time'] = $end->format('Y-m-d H:i:s');
 

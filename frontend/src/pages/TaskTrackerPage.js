@@ -16,12 +16,13 @@ const TaskTrackerPage = () => {
   const [trackedPeriod, setTrackedPeriod] = useState('total');
   const [trackedStart, setTrackedStart] = useState(null);
   const [trackedEnd, setTrackedEnd] = useState(null);
-  const [expandedId, setExpandedId] = useState(null);
   const [taskName, setTaskName] = useState('');
   const [projectName, setProjectName] = useState('');
   const [dueDate, setDueDate] = useState(null);
+  const [modalScreenshot, setModalScreenshot] = useState(null);
   const timerIntervalRef = useRef(null);
   const screenshotIntervalRef = useRef(null);
+  const heartbeatRef = useRef(null);
 
   useEffect(() => {
     const fetchScreenshots = async () => {
@@ -29,7 +30,7 @@ const TaskTrackerPage = () => {
         const data = await getScreenshots(taskId);
         setScreenshots(data);
       } catch (error) {
-        console.error('Error fetching screenshots:', error);
+        // console.error('Error fetching screenshots:', error);
       }
     };
 
@@ -41,7 +42,7 @@ const TaskTrackerPage = () => {
       try {
         const taskRes = await taskService.getTask(taskId);
         const t = taskRes.data;
-        console.log('Task data:', t);
+        // console.log('Task data:', t);
         setEstimatedHours(t.estimated_hours || 0);
         setTaskName(t.title || t.name || 'Unknown Task');
         setProjectName(t.project?.name || 'Unknown Project');
@@ -58,7 +59,7 @@ const TaskTrackerPage = () => {
           setTrackedEnd(remRes.data?.end || null);
         } catch {}
       } catch (e) {
-        console.error('Error fetching progress', e);
+        // console.error('Error fetching progress', e);
       }
     };
     fetchProgress();
@@ -76,11 +77,16 @@ const TaskTrackerPage = () => {
                 setTime(0);
             }
         } catch (error) {
-            console.error('Error fetching active timer:', error);
+            // console.error('Error fetching active timer:', error);
         }
     }
 
     fetchActiveTimer();
+    }, []);
+  useEffect(() => {
+    return () => {
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+    };
   }, []);
 
   const handleStartTracking = async () => {
@@ -135,6 +141,10 @@ const TaskTrackerPage = () => {
             return next;
           });
         }, 1000);
+        const sendHeartbeat = async () => { try { await timeTrackService.heartbeat(); } catch {} };
+        if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+        sendHeartbeat();
+        heartbeatRef.current = setInterval(sendHeartbeat, 10000);
         if (screenshotIntervalRef.current) {
             clearInterval(screenshotIntervalRef.current);
         }
@@ -147,7 +157,7 @@ const TaskTrackerPage = () => {
         await refresh();
         screenshotIntervalRef.current = setInterval(refresh, 60000);
     } catch (error) {
-        console.error('Error starting time tracking:', error);
+        // console.error('Error starting time tracking:', error);
     }
   };
 
@@ -169,9 +179,10 @@ const TaskTrackerPage = () => {
         if (screenshotIntervalRef.current) {
             clearInterval(screenshotIntervalRef.current);
         }
+        if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
         setTime(0);
     } catch (error) {
-        console.error('Error stopping time tracking:', error);
+        // console.error('Error stopping time tracking:', error);
     }
   };
 
@@ -258,30 +269,60 @@ const TaskTrackerPage = () => {
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     className="btn-secondary"
-                    onClick={() => setExpandedId(expandedId === screenshot.id ? null : screenshot.id)}
+                    onClick={() => setModalScreenshot(screenshot)}
                   >
-                    {expandedId === screenshot.id ? 'Hide Activity' : 'Show Activity'}
+                    Show Activity
                   </button>
                 </div>
-                {expandedId === screenshot.id && Array.isArray(screenshot.minute_breakdown) && (
-                  <div className="activity-list">
-                    <div className="section-title" style={{ marginBottom: 6 }}>Minute Activity</div>
-                    {screenshot.minute_breakdown.map((m, idx) => (
-                      <div key={idx} className="activity-item">
-                        <span className="activity-time">{m.time}</span>
-                        <span className="activity-stats">Keys {m.keyboard_clicks || 0} • Clicks {m.mouse_clicks || 0} • Moves {m.mouse_movements || 0}</span>
-                        {m.url ? (
-                          <a className="activity-link" href={m.url} target="_blank" rel="noreferrer">{m.title || m.url}</a>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
           </div>
         </div>
       </div>
+
+      {modalScreenshot && (
+        <div className="modal-overlay" onClick={() => setModalScreenshot(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', maxHeight: '80vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h3>Activity Breakdown</h3>
+              <button className="modal-close" onClick={() => setModalScreenshot(null)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="screenshot-meta" style={{ marginBottom: '1rem' }}>
+                <div className="stat-chip">Total Keys: {modalScreenshot.keyboard_clicks ?? 0}</div>
+                <div className="stat-chip">Total Clicks: {modalScreenshot.mouse_clicks ?? 0}</div>
+                <div className="stat-chip">Time: {new Date(modalScreenshot.created_at).toLocaleString()}</div>
+              </div>
+              
+              {Array.isArray(modalScreenshot.minute_breakdown) && modalScreenshot.minute_breakdown.length > 0 ? (
+                <div className="activity-list">
+                  <div className="section-title" style={{ marginBottom: 6 }}>Minute-by-Minute Activity</div>
+                  {modalScreenshot.minute_breakdown.map((m, idx) => (
+                    <div key={idx} className="activity-item">
+                      <span className="activity-time">{m.time}</span>
+                      <span className="activity-stats">Keys {m.keyboard_clicks || 0} • Clicks {m.mouse_clicks || 0} • Moves {m.mouse_movements || 0}</span>
+                      {m.url ? (
+                        <div style={{ fontSize: '0.85rem', marginTop: 4 }}>
+                          <a className="activity-link" href={m.url} target="_blank" rel="noreferrer" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {m.title || m.url}
+                          </a>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#666', padding: '2rem' }}>
+                  No detailed activity data available for this screenshot.
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-primary" onClick={() => setModalScreenshot(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

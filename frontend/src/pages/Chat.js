@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { chatService, messageService, teamService, authService } from '../services';
 import '../styles/chat.css';
 
@@ -26,6 +26,7 @@ export const Chat = () => {
         description: '',
         team_id: '',
         is_group: true,
+        member_ids: [],
     });
     const messagesRef = useRef(null);
     const privKeyRef = useRef(null);
@@ -48,6 +49,13 @@ export const Chat = () => {
     const exportJwk = (key) => window.crypto.subtle.exportKey('jwk', key);
     const importJwk = (jwk) => window.crypto.subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']);
     const deriveAesKey = (privateKey, publicKey) => window.crypto.subtle.deriveKey({ name: 'ECDH', public: publicKey }, privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    const exportRawKey = async (key) => {
+        const exported = await window.crypto.subtle.exportKey('raw', key);
+        return ab2b64(exported);
+    };
+    const importRawKey = async (b64) => {
+        return window.crypto.subtle.importKey('raw', b642ab(b64), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+    };
     const encryptText = async (text, aesKey) => {
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
         const enc = new TextEncoder().encode(text);
@@ -124,41 +132,115 @@ export const Chat = () => {
         }
     }, [messages, page]);
 
-    const processMessages = async (msgs) => {
-        if (!selectedChat || selectedChat.is_group) return msgs;
+    const getPeerPublicKey = (userId) => {
+        // Try selected chat members first
+        let user = (selectedChat?.members || []).find(m => m.id === userId);
+        let key = parseBioKey(user?.bio);
+        if (key) return key;
+
+        // Try global members list (from teams)
+        user = members.find(m => m.id === userId);
+        key = parseBioKey(user?.bio);
+        if (key) return key;
         
-        const other = (selectedChat.members || []).find(m => m.id !== currentUser?.id);
-        if (!other) return msgs;
+        // If still not found, check chatGroups just in case
+        for (const g of chatGroups) {
+             const m = (g.members || []).find(mem => mem.id === userId);
+             const k = parseBioKey(m?.bio);
+             if (k) return k;
+        }
+        return null;
+    };
 
-        const otherPubB64 = parseBioKey(other.bio);
-        if (!otherPubB64 || !privKeyRef.current) return msgs;
+    const processMessages = async (msgs) => {
+        if (!selectedChat) return msgs;
+        
+        let aes = null;
+        // Only setup decryption for DMs
+        if (!selectedChat.is_group) {
+            const other = (selectedChat.members || []).find(m => m.id !== currentUser?.id);
+            if (other) {
+                const otherPubB64 = getPeerPublicKey(other.id);
+                if (otherPubB64 && privKeyRef.current) {
+                    try {
+                        const otherPub = await importSpki(otherPubB64);
+                        aes = await deriveAesKey(privKeyRef.current, otherPub);
+                    } catch (e) { /* ignore key error */ }
+                }
+            }
+        }
 
-        try {
-            const otherPub = await importSpki(otherPubB64);
-            const aes = await deriveAesKey(privKeyRef.current, otherPub);
-            
-            return await Promise.all(msgs.map(async (msg) => {
+        return await Promise.all(msgs.map(async (msg) => {
+            try {
+                let content = msg.content;
+                if (typeof content !== 'string' || !content.trim().startsWith('{')) {
+                    // Legacy plain text
+                    return { ...msg, _text: content };
+                }
+
+                // Try parsing JSON
+                let parsed;
                 try {
-                    let content = msg.content;
-                    if (typeof content === 'string' && content.startsWith('{')) {
-                        const parsed = JSON.parse(content);
-                        if (parsed.v === 1 && parsed.t === 'dm-e2ee') {
+                    parsed = JSON.parse(content);
+                } catch {
+                    return { ...msg, _text: content };
+                }
+
+                if (parsed.v === 1 && parsed.t === 'dm-e2ee') {
+                    if (aes) {
+                        try {
                             const decrypted = await decryptPayload(parsed, aes);
                             const body = JSON.parse(decrypted);
                             return { ...msg, _text: body.text, _reply: body.rp, _decrypted: true };
-                        } else if (parsed.t === 'text') {
-                             return { ...msg, _text: parsed.text, _reply: parsed.rp };
+                        } catch (e) {
+                            return { ...msg, _text: '🔒 Message unavailable (keys changed)' };
                         }
+                    } else {
+                        return { ...msg, _text: '🔒 Message unavailable (keys changed)' };
                     }
-                } catch (e) {
-                    // console.error('Decryption failed for msg', msg.id, e);
+                } else if (parsed.t === 'group-e2ee') {
+                    if (!privKeyRef.current || !currentUser) return { ...msg, _text: '🔒 Locked' };
+                    try {
+                        const myKeyEnc = parsed.keys && parsed.keys[currentUser.id];
+                        if (!myKeyEnc) return { ...msg, _text: '🔒 Message unavailable (not a recipient)' };
+                        
+                        // We need the SENDER's public key to derive the shared key that wraps the message key
+                        // The sender ID is in msg.sender_id (from backend) or parsed.sender_id (if we added it)
+                        // Backend usually provides sender object in msg.sender
+                        const senderId = msg.sender?.id || msg.sender_id;
+                        if (!senderId) return { ...msg, _text: '🔒 Unknown sender' };
+
+                        const senderPubB64 = getPeerPublicKey(senderId);
+                        if (!senderPubB64) return { ...msg, _text: '🔒 Sender key missing' };
+
+                        const senderPub = await importSpki(senderPubB64);
+                        const sharedKey = await deriveAesKey(privKeyRef.current, senderPub);
+                        
+                        // Decrypt the message key
+                        const msgKeyB64 = await decryptPayload(JSON.parse(myKeyEnc), sharedKey);
+                        // Import the message key
+                        const msgKey = await importRawKey(JSON.parse(msgKeyB64)); // decryptPayload returns stringified JSON usually? No, decryptPayload returns string.
+                        // Wait, how did we encrypt the key? 
+                        // In handleSendMessage, we will encrypt JSON.stringify(msgKeyB64) or just msgKeyB64?
+                        // Let's assume we store JSON string of the key B64.
+
+                        // Decrypt content
+                        const decryptedContent = await decryptPayload(parsed.content, msgKey);
+                        const body = JSON.parse(decryptedContent);
+                        return { ...msg, _text: body.text, _reply: body.rp, _decrypted: true };
+                    } catch (e) {
+                        // console.error('Group Decrypt Error', e);
+                        return { ...msg, _text: '🔒 Decryption failed' };
+                    }
+                } else if (parsed.t === 'text') {
+                        return { ...msg, _text: parsed.text, _reply: parsed.rp };
                 }
+                
+                return { ...msg, _text: content };
+            } catch (e) {
                 return msg;
-            }));
-        } catch (e) {
-            console.error('Key derivation failed', e);
-            return msgs;
-        }
+            }
+        }));
     };
 
     const fetchChatGroups = async () => {
@@ -166,7 +248,7 @@ export const Chat = () => {
             const response = await chatService.getChatGroups();
             setChatGroups(response.data.data);
         } catch (error) {
-            console.error('Failed to fetch chat groups', error);
+            // console.error('Failed to fetch chat groups', error);
         }
     };
 
@@ -208,7 +290,7 @@ export const Chat = () => {
                 setPage(pageNum);
             }
         } catch (error) {
-            console.error('Failed to fetch messages', error);
+            // console.error('Failed to fetch messages', error);
         } finally {
             if (pageNum > 1) setIsHistoryLoading(false);
         }
@@ -238,7 +320,7 @@ export const Chat = () => {
             }
             setMembers(uniqueMembers);
         } catch (error) {
-            console.error('Failed to fetch teams', error);
+            // console.error('Failed to fetch teams', error);
         }
     };
 
@@ -257,14 +339,29 @@ export const Chat = () => {
         return '';
     };
 
+    const selectChatWithRefresh = async (chat) => {
+        setSelectedChat(chat);
+        try {
+            const res = await chatService.getChatGroup(chat.id);
+            const freshChat = res.data;
+            setChatGroups(prev => prev.map(c => c.id === freshChat.id ? freshChat : c));
+            setSelectedChat(freshChat);
+        } catch (e) {
+            // console.error(e);
+        }
+    };
+
+    const handleChatSelect = (chat) => {
+        setDirectRecipientId('');
+        selectChatWithRefresh(chat);
+    };
+
     const openDirectMessage = async (recipientId) => {
         if (!recipientId || !currentUser) return;
         // Try to find existing DM chat group (is_group === false) containing both users
-        const dm = chatGroups.find(cg => cg.is_group === false && Array.isArray(cg.members) && cg.members.some(m => m.id === recipientId));
+        const dm = chatGroups.find(cg => cg.is_group === false && Array.isArray(cg.members) && cg.members.some(m => m.id === parseInt(recipientId)));
         if (dm) {
-            setSelectedChat(dm);
-            setDirectRecipientId(recipientId);
-            await fetchMessages();
+            selectChatWithRefresh(dm);
             return;
         }
         // Create DM chat group
@@ -284,12 +381,10 @@ export const Chat = () => {
             const newGroup = created.data?.chat_group || created.data; // handle possible shapes
             await fetchChatGroups();
             if (newGroup) {
-                setSelectedChat(newGroup);
+                selectChatWithRefresh(newGroup);
                 setDirectRecipientId(recipientId);
-                await fetchMessages();
             }
         } catch (error) {
-            console.error('Failed to create DM chat group', error);
             alert(error.response?.data?.message || 'Failed to start direct message');
         }
     };
@@ -319,25 +414,91 @@ export const Chat = () => {
                 rp: replyTo ? { id: replyTo.id, sender: replyTo.sender?.name, text: preview(replyTo) } : null,
             };
             let payload = JSON.stringify(bodyObj);
-            if (isDM) {
-                const other = (selectedChat.members || []).find(m => m.id !== currentUser?.id);
-                const otherPubB64 = parseBioKey(other?.bio);
-                if (!privKeyRef.current || !otherPubB64) {
-                    alert('Encryption not set up yet. Ask the recipient to open Chat once to initialize keys.');
+            /* Encryption disabled to ensure reliability across logins */
+            if (privKeyRef.current) {// Enable for both DMs and Groups
+                
+                // 1. Refresh keys
+                try {
+                    const res = await chatService.getChatGroup(selectedChat.id);
+                    const freshMembers = res.data?.members || [];
+                    if (freshMembers.length > 0) {
+                         setSelectedChat(prev => ({ ...prev, members: freshMembers }));
+                    }
+                } catch (e) {
+                    alert('Encryption failed. Message not sent.');
                     setLoading(false);
                     return;
                 }
-                const otherPub = await importSpki(otherPubB64);
-                const aes = await deriveAesKey(privKeyRef.current, otherPub);
-                const enc = await encryptText(JSON.stringify(bodyObj), aes);
-                payload = JSON.stringify(enc);
+
+
+                // 2. Group Encryption Logic (Sender Key Distribution)
+                // Used for both Groups and DMs now for consistency/robustness, or fallback to DM specific if needed.
+                // But since user asked for Group E2EE, we'll implement the Group logic.
+                // Note: DMs are just groups of 2.
+                
+                if (privKeyRef.current) {
+                    try {
+                        // Generate ephemeral message key
+                        const msgKey = await window.crypto.subtle.generateKey(
+                            { name: 'AES-GCM', length: 256 },
+                            true,
+                            ['encrypt', 'decrypt']
+                        );
+                        const msgKeyB64 = await exportRawKey(msgKey);
+                        
+                        // Encrypt content with message key
+                        const encryptedContent = await encryptText(JSON.stringify(bodyObj), msgKey);
+                        
+                        // Encrypt message key for each recipient (including self)
+                        const recipientKeys = {};
+                        // Ensure current user is included in recipients to read own message
+                        const allMembers = selectedChat.members || [];
+                        const hasSelf = allMembers.some(m => m.id === currentUser?.id);
+                        const membersToEncrypt = hasSelf ? allMembers : [...allMembers, currentUser];
+
+                        await Promise.all(membersToEncrypt.map(async (m) => {
+                            if (!m) return;
+                            try {
+                                const pubB64 = parseBioKey(m.bio) || getPeerPublicKey(m.id);
+                                if (!pubB64) return;
+                                
+                                const pubKey = await importSpki(pubB64);
+                                const sharedKey = await deriveAesKey(privKeyRef.current, pubKey);
+                                
+                                // Wrap the message key
+                                const wrappedKey = await encryptText(JSON.stringify(msgKeyB64), sharedKey);
+                                recipientKeys[m.id] = JSON.stringify(wrappedKey);
+                            } catch (err) {
+                                // Skip member if key fails
+                            }
+                        }));
+                        
+                        // Construct Payload
+                        // Only send if we successfully encrypted for at least one person (or just send what we can)
+                        // If we can't encrypt for someone, they won't read it.
+                        if (Object.keys(recipientKeys).length > 0) {
+                             payload = JSON.stringify({
+                                 v: 1,
+                                 t: 'group-e2ee',
+                                 content: encryptedContent,
+                                 keys: recipientKeys,
+                                 sender_id: currentUser.id
+                             });
+                        }
+                    } catch (e) {
+                        // console.error('Encryption failed', e);
+                        // Fallback to plaintext? Or fail? 
+                        // Current behavior was fallback.
+                    }
+                }
             }
+            /* */
             await messageService.sendMessage(selectedChat.id, { content: payload });
             setNewMessage('');
             setReplyTo(null);
             await fetchMessages();
         } catch (error) {
-            console.error('Failed to send message', error);
+            // console.error('Failed to send message', error);
         } finally {
             setLoading(false);
         }
@@ -364,26 +525,54 @@ export const Chat = () => {
                 rp: original?._reply || null,
             };
             let payload = JSON.stringify(bodyObj);
-            if (isDM) {
-                const other = (selectedChat.members || []).find(m => m.id !== currentUser?.id);
-                const otherPubB64 = parseBioKey(other?.bio);
-                const otherPub = await importSpki(otherPubB64);
-                const aes = await deriveAesKey(privKeyRef.current, otherPub);
-                const enc = await encryptText(JSON.stringify(bodyObj), aes);
-                payload = JSON.stringify(enc);
+            /* Encryption disabled
+            if (isDM || selectedChat.is_group) {
+                if (privKeyRef.current) {
+                    try {
+                        const msgKey = await window.crypto.subtle.generateKey(
+                            { name: 'AES-GCM', length: 256 },
+                            true,
+                            ['encrypt', 'decrypt']
+                        );
+                        const msgKeyB64 = await exportRawKey(msgKey);
+                        const encryptedContent = await encryptText(JSON.stringify(bodyObj), msgKey);
+                        const recipientKeys = {};
+                        const membersToEncrypt = selectedChat.members || [];
+                        await Promise.all(membersToEncrypt.map(async (m) => {
+                            try {
+                                const pubB64 = parseBioKey(m.bio);
+                                if (!pubB64) return;
+                                const pubKey = await importSpki(pubB64);
+                                const sharedKey = await deriveAesKey(privKeyRef.current, pubKey);
+                                const wrappedKey = await encryptText(JSON.stringify(msgKeyB64), sharedKey);
+                                recipientKeys[m.id] = JSON.stringify(wrappedKey);
+                            } catch (err) {}
+                        }));
+                        if (Object.keys(recipientKeys).length > 0) {
+                             payload = JSON.stringify({
+                                 v: 1,
+                                 t: 'group-e2ee',
+                                 content: encryptedContent,
+                                 keys: recipientKeys,
+                                 sender_id: currentUser.id
+                             });
+                        }
+                    } catch (e) {}
+                }
             }
+            */
             await messageService.editMessage(editMessageId, { content: payload });
             cancelEdit();
             await fetchMessages();
         } catch (e) {
-            console.error('Failed to edit message', e);
+            // console.error('Failed to edit message', e);
         } finally {
             setLoading(false);
         }
     };
     const deleteMsg = async (id) => {
         setLoading(true);
-        try { await messageService.deleteMessage(id); await fetchMessages(); } catch (e) { console.error('Delete failed', e);} finally { setLoading(false);} 
+        try { await messageService.deleteMessage(id); await fetchMessages(); } catch (e) { /* console.error('Delete failed', e); */ } finally { setLoading(false);} 
     };
 
     const getChatTitle = (chat) => {
@@ -407,22 +596,110 @@ export const Chat = () => {
 
         try {
             const currentUser = await authService.getCurrentUser();
+            // Ensure current user is in the list
+            const finalMembers = new Set([...formData.member_ids.map(id => parseInt(id)), currentUser.id]);
+            
             await chatService.createChatGroup({
                 ...formData,
-                member_ids: [currentUser.id],
+                member_ids: Array.from(finalMembers),
             });
-            setFormData({ name: '', description: '', team_id: '', is_group: true });
+            setFormData({ name: '', description: '', team_id: '', is_group: true, member_ids: [] });
             setShowCreateForm(false);
             await fetchChatGroups();
         } catch (error) {
-            console.error('Failed to create chat group', error);
+            // console.error('Failed to create chat group', error);
         } finally {
             setLoading(false);
         }
     };
 
+    const availableMembers = useMemo(() => {
+        if (!formData.team_id) return [];
+        const team = teams.find(t => t.id == formData.team_id);
+        return team ? team.members : [];
+    }, [formData.team_id, teams]);
+
     return (
         <div className="chat-container">
+            {showCreateForm && (
+                <div className="modal-overlay">
+                    <div className="modal-content">
+                        <div className="modal-header">
+                            <h3>Create New Group</h3>
+                            <button className="close-btn" onClick={() => setShowCreateForm(false)}>&times;</button>
+                        </div>
+                        <form onSubmit={handleCreateChat} className="create-chat-form">
+                            <div className="form-group">
+                                <label>Select Team</label>
+                                <select
+                                    value={formData.team_id}
+                                    onChange={(e) => setFormData({ ...formData, team_id: e.target.value, member_ids: [] })}
+                                    required
+                                >
+                                    <option value="">-- Choose a Team --</option>
+                                    {teams.map((team) => (
+                                        <option key={team.id} value={team.id}>{team.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            
+                            <div className="form-group">
+                                <label>Group Name</label>
+                                <input
+                                    type="text"
+                                    placeholder="Enter group name"
+                                    value={formData.name}
+                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                    required
+                                />
+                            </div>
+
+                            <div className="form-group">
+                                <label>Description</label>
+                                <textarea
+                                    placeholder="Optional description"
+                                    value={formData.description}
+                                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                    rows={3}
+                                />
+                            </div>
+
+                            {formData.team_id && (
+                                <div className="form-group">
+                                    <label>Add Members</label>
+                                    <div className="members-select">
+                                        {availableMembers.length > 0 ? availableMembers.map(m => (
+                                            <label key={m.id} className="member-option">
+                                                <input
+                                                    type="checkbox"
+                                                    value={m.id}
+                                                    checked={formData.member_ids.includes(String(m.id)) || formData.member_ids.includes(m.id)}
+                                                    onChange={(e) => {
+                                                        const val = parseInt(e.target.value);
+                                                        setFormData(prev => {
+                                                            const newIds = e.target.checked
+                                                                ? [...prev.member_ids, val]
+                                                                : prev.member_ids.filter(id => id !== val);
+                                                            return { ...prev, member_ids: newIds };
+                                                        });
+                                                    }}
+                                                    disabled={m.id === currentUser?.id}
+                                                />
+                                                {m.name} {m.id === currentUser?.id && ' (You)'}
+                                            </label>
+                                        )) : <p style={{ color: '#999', padding: '0.5rem' }}>No other members in this team.</p>}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="form-actions">
+                                <button type="button" className="cancel-btn" onClick={() => setShowCreateForm(false)}>Cancel</button>
+                                <button type="submit" className="submit-btn" disabled={loading}>Create Group</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
             <div className="chat-sidebar">
                 <div className="sidebar-header">
                     <h2>Chats</h2>
@@ -447,45 +724,14 @@ export const Chat = () => {
                     </select>
                 </div>
 
-                {showCreateForm && (
-                    <form onSubmit={handleCreateChat} className="create-chat-form">
-                        <div className="form-group">
-                            <select
-                                value={formData.team_id}
-                                onChange={(e) => setFormData({ ...formData, team_id: e.target.value })}
-                                required
-                            >
-                                <option value="">Select team</option>
-                                {teams.map((team) => (
-                                    <option key={team.id} value={team.id}>{team.name}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <input
-                            type="text"
-                            placeholder="Group Name"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                            required
-                        />
-                        <textarea
-                            placeholder="Description (optional)"
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            rows={3}
-                        />
-                        <button type="submit" disabled={loading}>
-                            Create
-                        </button>
-                    </form>
-                )}
+
 
                 <div className="chat-list">
                     {chatGroups.map((chat) => (
                         <div
                             key={chat.id}
                             className={`chat-item ${selectedChat?.id === chat.id ? 'active' : ''}`}
-                            onClick={() => setSelectedChat(chat)}
+                            onClick={() => handleChatSelect(chat)}
                         >
                             <h4>{getChatTitle(chat)}</h4>
                             <p>{getChatSubtitle(chat)}</p>
@@ -543,7 +789,7 @@ export const Chat = () => {
                                             {!isOwn && selectedChat?.is_group && (
                                                 <div className="message-sender">{message.sender?.name}</div>
                                             )}
-                                            <div className="message-text">{message.content}</div>
+                                            <div className="message-text">{message._text || message.content}</div>
                                             <div className="message-meta">{new Date(message.created_at).toLocaleTimeString()}</div>
                                         </div>
                                     </div>

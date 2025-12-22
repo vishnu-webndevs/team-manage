@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Task;
+use App\Models\Project;
+use App\Models\TeamMember;
 use App\Models\Notification;
 use App\Models\TaskLog;
 use App\Models\Screenshot;
@@ -54,12 +56,7 @@ class TaskController extends Controller
 
     public function store(Request $request)
     {
-        // Check if user has permission to create tasks
-        if (!auth()->user()->hasRole('admin') && !auth()->user()->hasRole('project_manager')) {
-            return response()->json([
-                'message' => 'Unauthorized. Only admin and project managers can create tasks.',
-            ], 403);
-        }
+        $user = auth()->user();
 
         $validated = $request->validate([
             'project_id' => 'required|exists:projects,id',
@@ -71,6 +68,18 @@ class TaskController extends Controller
             'time_reset_policy' => 'nullable|in:fixed,per_week',
             'due_date' => 'nullable|date',
         ]);
+
+        // Authorization: global admin/PM OR team admin of the project's team
+        $isGlobalAdmin = $user->hasRole('admin') || $user->hasRole('project_manager');
+        if (!$isGlobalAdmin) {
+            $teamId = Project::where('id', $validated['project_id'])->value('team_id');
+            $isTeamAdmin = TeamMember::where('team_id', $teamId)->where('user_id', $user->id)->where('role', 'admin')->exists();
+            if (!$isTeamAdmin) {
+                return response()->json([
+                    'message' => 'Unauthorized. Only admin, project managers, or team admins can create tasks.',
+                ], 403);
+            }
+        }
 
         $payload = [
             'project_id' => $validated['project_id'],
@@ -268,11 +277,16 @@ class TaskController extends Controller
 
     public function assign(Request $request, Task $task)
     {
-        // Check if user is admin or project_manager
-        if (!auth()->user()->hasRole('admin') && !auth()->user()->hasRole('project_manager')) {
-            return response()->json([
-                'message' => 'Unauthorized. Only admin and project managers can assign tasks.',
-            ], 403);
+        $user = auth()->user();
+        $isGlobalAdmin = $user->hasRole('admin') || $user->hasRole('project_manager');
+        if (!$isGlobalAdmin) {
+            $teamId = Project::where('id', $task->project_id)->value('team_id');
+            $isTeamAdmin = TeamMember::where('team_id', $teamId)->where('user_id', $user->id)->where('role', 'admin')->exists();
+            if (!$isTeamAdmin) {
+                return response()->json([
+                    'message' => 'Unauthorized. Only admin, project managers, or team admins can assign tasks.',
+                ], 403);
+            }
         }
 
         $validated = $request->validate([

@@ -1,11 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { timeTrackService, taskService, projectService } from '../services';
-import { startScreenshotting, stopScreenshotting, getScreenshots, captureNow } from '../services/screenshotService';
+import { startScreenshotting, stopScreenshotting, getScreenshots, captureNow, releaseScreenPermission } from '../services/screenshotService';
 import activityTracker from '../services/activityTracker';
 import ScreenshotNotification from '../components/ScreenshotNotification';
-import api, { getStorageUrl } from '../services/api';
-import html2canvas from 'html2canvas';
+// import api, { getStorageUrl } from '../services/api';
+import { getStorageUrl } from '../services/api';
+// import html2canvas from 'html2canvas';
 import '../styles/timetracker.css';
+
+const shouldAutoStop = (currentTime, tracked, cap) => {
+  if (!cap || cap <= 0) return false;
+  return tracked + currentTime >= cap;
+};
 
 const formatTime = (s) => {
   // Handle NaN, null, undefined, or negative values
@@ -23,12 +29,12 @@ const formatTime = (s) => {
 const TimeTracker = () => {
   const [isTracking, setIsTracking] = useState(false);
   const [time, setTime] = useState(0);
-  const [todayTotalTime, setTodayTotalTime] = useState(0); // Today's total tracked time
+  // const [todayTotalTime, setTodayTotalTime] = useState(0); // Today's total tracked time
   const [taskTodayTotalTime, setTaskTodayTotalTime] = useState(0);
   const [taskTimeLimit, setTaskTimeLimit] = useState(0); // Task time limit in seconds
   const [taskCapSeconds, setTaskCapSeconds] = useState(0);
   const [taskTrackedSeconds, setTaskTrackedSeconds] = useState(0);
-  const [taskRemainingSeconds, setTaskRemainingSeconds] = useState(0);
+  // const [taskRemainingSeconds, setTaskRemainingSeconds] = useState(0);
   const [resumedTime, setResumedTime] = useState(0); // Time to resume from
   const [activeTimeTrack, setActiveTimeTrack] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -50,6 +56,7 @@ const TimeTracker = () => {
   const hardStopTimeoutRef = useRef(null);
   const activeTrackIdRef = useRef(null);
   const isStoppingRef = useRef(false);
+  const heartbeatRef = useRef(null);
 
   const showToast = (title, message, type = 'warning') => {
     const el = document.createElement('div');
@@ -83,6 +90,7 @@ const TimeTracker = () => {
     } else {
       setTaskRemainingMap({});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
 
   useEffect(() => {
@@ -91,7 +99,7 @@ const TimeTracker = () => {
       const msg = typeof r === 'string' ? r : (r && (r.message || r.toString()));
       if (msg && String(msg).includes('message channel closed before a response')) {
         e.preventDefault();
-        console.log('Ignored extension async response error');
+        // console.log('Ignored extension async response error');
       }
     };
     window.addEventListener('unhandledrejection', handler);
@@ -106,7 +114,7 @@ const TimeTracker = () => {
         const v = Math.max(0, parseInt(dbg));
         if (!isNaN(v) && v > 0) {
           localStorage.setItem('TM_DEBUG_SHORT_LIMIT_SECONDS', String(v));
-          console.log(`TM_DEBUG_SHORT_LIMIT_SECONDS set to ${v}s`);
+          // console.log(`TM_DEBUG_SHORT_LIMIT_SECONDS set to ${v}s`);
         }
       }
     } catch {}
@@ -156,7 +164,7 @@ const TimeTracker = () => {
     if (!taskId) {
       setTaskCapSeconds(0);
       setTaskTrackedSeconds(0);
-      setTaskRemainingSeconds(0);
+      // setTaskRemainingSeconds(0);
       setTaskTimeLimit(0);
       return;
     }
@@ -169,7 +177,7 @@ const TimeTracker = () => {
       if (override > 0) { cap = override; remaining = override; }
       setTaskCapSeconds(cap);
       setTaskTrackedSeconds(tracked);
-      setTaskRemainingSeconds(remaining);
+      // setTaskRemainingSeconds(remaining);
       setTaskTimeLimit(remaining);
     } catch {
       let cap = getTaskTimeLimit(taskId);
@@ -177,7 +185,7 @@ const TimeTracker = () => {
       if (override > 0) cap = override;
       setTaskCapSeconds(cap);
       setTaskTrackedSeconds(0);
-      setTaskRemainingSeconds(cap);
+      // setTaskRemainingSeconds(cap);
       setTaskTimeLimit(cap);
     }
   };
@@ -211,14 +219,14 @@ const TimeTracker = () => {
             isNaN(state.time) ||
             !state.timestamp ||
             elapsed < 0) {
-          console.log('🚫 Invalid timer state found, clearing...');
+          // console.log('🚫 Invalid timer state found, clearing...');
           clearTimerState();
           return false;
         }
         
         // If more than 1 hour ago, don't resume
         if (elapsed >= 3600) {
-          console.log('⏰ Timer state too old (>1h), clearing...');
+          // console.log('⏰ Timer state too old (>1h), clearing...');
           clearTimerState();
           return false;
         }
@@ -233,12 +241,12 @@ const TimeTracker = () => {
           setTime(resumeTime);
           setIsTracking(true);
           
-          console.log(`🔄 Resuming timer from ${formatTime(state.time)} + ${formatTime(elapsed)} = ${formatTime(resumeTime)}`);
+          // console.log(`🔄 Resuming timer from ${formatTime(state.time)} + ${formatTime(elapsed)} = ${formatTime(resumeTime)}`);
           return true;
         }
       }
     } catch (error) {
-      console.log('❌ Error loading timer state:', error);
+      // console.log('❌ Error loading timer state:', error);
       clearTimerState();
     }
     return false;
@@ -255,7 +263,7 @@ const TimeTracker = () => {
       const hasResumableState = loadTimerState();
       
       if (hasResumableState) {
-        console.log('✅ Timer resumed from localStorage - not auto-starting');
+        // console.log('✅ Timer resumed from localStorage - not auto-starting');
         return; // Exit early, timer already resumed
       }
       
@@ -271,7 +279,7 @@ const TimeTracker = () => {
         
         // Validate elapsed time
         if (isNaN(elapsed) || elapsed < 0) {
-          console.log('❌ Invalid elapsed time, resetting timer');
+          // console.log('❌ Invalid elapsed time, resetting timer');
           setIsTracking(false);
           setActiveTimeTrack(null);
           setTime(0);
@@ -286,7 +294,7 @@ const TimeTracker = () => {
             const newTime = t + 1;
             // Check task time limit
             if (taskTimeLimit > 0 && newTime >= taskTimeLimit) {
-              console.log('⏰ Task time limit reached, stopping timer');
+              // console.log('⏰ Task time limit reached, stopping timer');
               stopTimer();
               return newTime;
             }
@@ -295,7 +303,7 @@ const TimeTracker = () => {
         }, 1000);
         
         const activeTaskId = res.data.task_id || res.data.task?.id;
-        console.log('🔍 Active task ID:', activeTaskId, 'from data:', res.data);
+        // console.log('🔍 Active task ID:', activeTaskId, 'from data:', res.data);
         
         if (activeTaskId) {
           // Do not auto-start screenshotting here to avoid repeated permission prompts
@@ -304,9 +312,9 @@ const TimeTracker = () => {
             try {
               const data = await getScreenshots(activeTaskId);
               setScreenshots(data || []);
-              console.log(`📸 Loaded ${data?.length || 0} screenshots for active task ${activeTaskId}`);
+              // console.log(`📸 Loaded ${data?.length || 0} screenshots for active task ${activeTaskId}`);
             } catch (error) {
-              console.log('Error loading screenshots:', error);
+              // console.log('Error loading screenshots:', error);
             }
           };
           load();
@@ -340,8 +348,8 @@ const TimeTracker = () => {
       const historyData = res.data.data || [];
       setHistory(historyData);
       
-      const overallToday = calculateTodayTotal(historyData);
-      setTodayTotalTime(overallToday);
+      // const overallToday = calculateTodayTotal(historyData);
+      // setTodayTotalTime(overallToday);
       const selectedTaskId = startForm.task_id ? parseInt(startForm.task_id) : null;
       const taskToday = selectedTaskId ? calculateTodayTotal(historyData, selectedTaskId) : 0;
       setTaskTodayTotalTime(taskToday);
@@ -372,12 +380,52 @@ const TimeTracker = () => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (activityUpdateRef.current) clearInterval(activityUpdateRef.current);
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     isTrackingRef.current = isTracking;
   }, [isTracking]);
+
+  const stopOnUnload = () => {
+    try { saveTimerState(); } catch {}
+    const id = activeTrackIdRef.current || activeTimeTrack?.id;
+    const token = localStorage.getItem('token') || '';
+    const base = (process.env.REACT_APP_API_URL || 'http://localhost:8000/api');
+    if (id) {
+      try {
+        fetch(`${base}/time-tracks/${id}/stop`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({}),
+          keepalive: true,
+        });
+      } catch {}
+    }
+    try { stopScreenshotting(); } catch {}
+  };
+
+  useEffect(() => {
+    if (!isTracking) return;
+    const handleBeforeUnload = () => stopOnUnload();
+    const handlePageHide = () => stopOnUnload();
+    // Removed visibilitychange to allow background tracking
+    const handleOffline = () => stopOnUnload();
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('offline', handleOffline);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTracking, activeTimeTrack]);
 
   useEffect(() => {
     const selectedTaskId = startForm.task_id ? parseInt(startForm.task_id) : null;
@@ -388,6 +436,7 @@ const TimeTracker = () => {
     } else {
       refreshTaskLimitInfo(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startForm.task_id, history]);
 
   const startTimer = async (e) => {
@@ -448,13 +497,13 @@ const TimeTracker = () => {
         }
         setTaskCapSeconds(cap);
         setTaskTrackedSeconds(tracked);
-        setTaskRemainingSeconds(remaining);
+        // setTaskRemainingSeconds(remaining);
         setTaskTimeLimit(remaining);
         if (remaining > 0) {
-          console.log(`⏰ Task remaining set: ${formatTime(remaining)} (cap ${formatTime(cap)}, tracked ${formatTime(tracked)})`);
+          // console.log(`⏰ Task remaining set: ${formatTime(remaining)} (cap ${formatTime(cap)}, tracked ${formatTime(tracked)})`);
           if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
           autoStopTimeoutRef.current = setTimeout(() => {
-            console.log('⏰ Auto-stop timeout fired');
+            // console.log('⏰ Auto-stop timeout fired');
             if (!isStoppingRef.current) {
               isStoppingRef.current = true;
               stopTimer();
@@ -481,25 +530,39 @@ const TimeTracker = () => {
           }
           
           // Check task time limit
-          if ((remaining > 0 && newTime >= remaining) || (cap > 0 && (tracked + newTime) >= cap)) {
-            console.log('⏰ Task time limit reached, auto-stopping timer');
+          // if ((remaining > 0 && newTime >= remaining) || (cap > 0 && (tracked + newTime) >= cap)) {
+          //   // console.log('⏰ Task time limit reached, auto-stopping timer');
+          //   if (!isStoppingRef.current) {
+          //     isStoppingRef.current = true;
+          //     stopTimer();
+          //   }
+          //   return newTime;
+          // }
+          if (shouldAutoStop(newTime, taskTrackedSeconds, taskCapSeconds)) {
             if (!isStoppingRef.current) {
               isStoppingRef.current = true;
               stopTimer();
+              stopScreenshotting();
+              releaseScreenPermission();
             }
-            return newTime;
+            return t; // ⛔ time freeze
           }
-          
+
           // Warning at 90% of time limit
           if (!warned90Ref.current && ((remaining > 0 && newTime >= Math.floor(remaining * 0.9)) || (cap > 0 && Math.floor(((tracked + newTime) / cap) * 100) >= 90))) {
             warned90Ref.current = true;
-            console.log('⚠️ 90% of task time limit reached');
+            // console.log('⚠️ 90% of task time limit reached');
             showToast('⚠️ 90% limit reached', `Remaining: ${formatTime(remaining)} | Current: ${formatTime(newTime)}`, 'warning');
           }
           
           return newTime;
         });
       }, 1000);
+
+      const sendHeartbeat = async () => { try { await timeTrackService.heartbeat(); } catch {} };
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+      sendHeartbeat();
+      heartbeatRef.current = setInterval(sendHeartbeat, 10000);
       
       if (startForm.task_id) {
         const tid = parseInt(startForm.task_id);
@@ -516,9 +579,9 @@ const TimeTracker = () => {
           try {
             const data = await getScreenshots(tid);
             setScreenshots(data || []);
-            console.log(`📸 Loaded ${data?.length || 0} screenshots for task ${tid}`);
+            // console.log(`📸 Loaded ${data?.length || 0} screenshots for task ${tid}`);
           } catch (error) {
-            console.log('Error loading screenshots:', error);
+            // console.log('Error loading screenshots:', error);
           }
         };
         load(); // Load immediately
@@ -532,7 +595,7 @@ const TimeTracker = () => {
       setTimeout(() => setShowNotification(false), 3000);
       await loadHistory(); // Refresh to get updated today's total
     } catch (error) {
-      console.error('Start timer error:', error);
+      // console.error('Start timer error:', error);
       if (error.response && error.response.status === 403) {
         const data = error.response.data;
         if (data.message === 'Time limit reached for this task') {
@@ -554,118 +617,130 @@ const TimeTracker = () => {
     setLoading(false);
   };
 
-  const pauseTimer = () => {
-    setIsTracking(false);
-    setResumedTime(time); // Save current time for resume
+  // const pauseTimer = () => {
+  //   setIsTracking(false);
+  //   setResumedTime(time); // Save current time for resume
     
-    // Clear intervals but keep timer state
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+  //   // Clear intervals but keep timer state
+  //   if (timerRef.current) {
+  //     clearInterval(timerRef.current);
+  //     timerRef.current = null;
+  //   }
     
-    if (screenshotListRef.current) {
-      clearInterval(screenshotListRef.current);
-      screenshotListRef.current = null;
-    }
+  //   if (screenshotListRef.current) {
+  //     clearInterval(screenshotListRef.current);
+  //     screenshotListRef.current = null;
+  //   }
     
-    stopScreenshotting();
-    if (autoStopTimeoutRef.current) {
-      clearTimeout(autoStopTimeoutRef.current);
-      autoStopTimeoutRef.current = null;
-    }
-    saveTimerState(); // Save current state to localStorage
+  //   stopScreenshotting();
+  //   releaseScreenPermission(); // Stop screen sharing to avoid confusion on resume
     
-    console.log(`⏸️ Timer paused at ${formatTime(time)}`);
-  };
+  //   if (autoStopTimeoutRef.current) {
+  //     clearTimeout(autoStopTimeoutRef.current);
+  //     autoStopTimeoutRef.current = null;
+  //   }
+  //   if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+  //   saveTimerState(); // Save current state to localStorage
+    
+  //   // console.log(`⏸️ Timer paused at ${formatTime(time)}`);
+  // };
 
-  const resumeTimer = () => {
-    setIsTracking(true);
+  // const resumeTimer = () => {
+  //   setIsTracking(true);
     
-    // Resume timer from current time
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setTime((t) => {
-        const newTime = t + 1;
+  //   // Restore time from resumedTime if needed
+  //   if (resumedTime > 0 && time === 0) {
+  //     setTime(resumedTime);
+  //   }
+
+  //   // Resume timer from current time
+  //   if (timerRef.current) clearInterval(timerRef.current);
+  //   timerRef.current = setInterval(() => {
+  //     setTime((t) => {
+  //       const newTime = t + 1;
         
-        // Save timer state every 30 seconds
-        if (newTime % 30 === 0) {
-          saveTimerState();
-        }
+  //       // Save timer state every 30 seconds
+  //       if (newTime % 30 === 0) {
+  //         saveTimerState();
+  //       }
         
-        // Check task time limit
-        if ((taskTimeLimit > 0 && newTime >= taskTimeLimit) || (taskCapSeconds > 0 && (taskTrackedSeconds + newTime) >= taskCapSeconds)) {
-          console.log('⏰ Task time limit reached, auto-stopping timer');
-          setTimeout(() => stopTimer(), 1000); // Stop after 1 second
-          return newTime;
-        }
+  //       // Check task time limit
+  //       if ((taskTimeLimit > 0 && newTime >= taskTimeLimit) || (taskCapSeconds > 0 && (taskTrackedSeconds + newTime) >= taskCapSeconds)) {
+  //         // console.log('⏰ Task time limit reached, auto-stopping timer');
+  //         setTimeout(() => stopTimer(), 1000); // Stop after 1 second
+  //         return newTime;
+  //       }
         
-        // Warning at 90% of time limit
-        if (!warned90Ref.current && ((taskTimeLimit > 0 && newTime >= Math.floor(taskTimeLimit * 0.9)) || (taskCapSeconds > 0 && Math.floor(((taskTrackedSeconds + newTime) / taskCapSeconds) * 100) >= 90))) {
-          warned90Ref.current = true;
-          console.log('⚠️ 90% of task time limit reached');
-          showToast('⚠️ 90% limit reached', `Limit: ${formatTime(taskTimeLimit)} | Current: ${formatTime(newTime)}`, 'warning');
-        }
+  //       // Warning at 90% of time limit
+  //       if (!warned90Ref.current && ((taskTimeLimit > 0 && newTime >= Math.floor(taskTimeLimit * 0.9)) || (taskCapSeconds > 0 && Math.floor(((taskTrackedSeconds + newTime) / taskCapSeconds) * 100) >= 90))) {
+  //         warned90Ref.current = true;
+  //         // console.log('⚠️ 90% of task time limit reached');
+  //         showToast('⚠️ 90% limit reached', `Limit: ${formatTime(taskTimeLimit)} | Current: ${formatTime(newTime)}`, 'warning');
+  //       }
         
-        return newTime;
-      });
-    }, 1000);
-    if (taskCapSeconds > 0) {
-      const remainingMs = Math.max(0, (taskCapSeconds - taskTrackedSeconds - time) * 1000);
-      if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
-      autoStopTimeoutRef.current = setTimeout(() => {
-        console.log('⏰ Auto-stop timeout (resume) fired');
-        if (!isStoppingRef.current) {
-          isStoppingRef.current = true;
-          stopTimer();
-        }
-      }, remainingMs + 500);
-      if (hardStopTimeoutRef.current) clearTimeout(hardStopTimeoutRef.current);
-      hardStopTimeoutRef.current = setTimeout(() => {
-        if (!isStoppingRef.current) {
-          isStoppingRef.current = true;
-          stopTimer();
-        }
-      }, Math.max(0, remainingMs + 800));
-    }
+  //       return newTime;
+  //     });
+  //   }, 1000);
+  //   if (taskCapSeconds > 0) {
+  //     const remainingMs = Math.max(0, (taskCapSeconds - taskTrackedSeconds - time) * 1000);
+  //     if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
+  //     autoStopTimeoutRef.current = setTimeout(() => {
+  //       // console.log('⏰ Auto-stop timeout (resume) fired');
+  //       if (!isStoppingRef.current) {
+  //         isStoppingRef.current = true;
+  //         stopTimer();
+  //       }
+  //     }, remainingMs + 500);
+  //     if (hardStopTimeoutRef.current) clearTimeout(hardStopTimeoutRef.current);
+  //     hardStopTimeoutRef.current = setTimeout(() => {
+  //       if (!isStoppingRef.current) {
+  //         isStoppingRef.current = true;
+  //         stopTimer();
+  //       }
+  //     }, Math.max(0, remainingMs + 800));
+  //   }
     
-    // Resume screenshot capturing if task is selected
-    if (activeTimeTrack?.task_id) {
-      // Refresh remaining limit on resume
-      fetchRemainingForTask(activeTimeTrack.task_id).then((sec) => setTaskTimeLimit(sec)).catch(() => {});
-      const task = tasks.find(t => t.id === activeTimeTrack.task_id);
-      const project = projects.find(p => p.id === activeTimeTrack.project_id);
-      const taskName = task?.name || task?.title || 'Unknown Task';
-      const projectName = project?.name || 'Unknown Project';
+  //   // Resume screenshot capturing if task is selected
+  //   if (activeTimeTrack?.task_id) {
+  //     // Refresh remaining limit on resume
+  //     fetchRemainingForTask(activeTimeTrack.task_id).then((sec) => setTaskTimeLimit(sec)).catch(() => {});
+  //     const task = tasks.find(t => t.id === activeTimeTrack.task_id);
+  //     const project = projects.find(p => p.id === activeTimeTrack.project_id);
+  //     const taskName = task?.name || task?.title || 'Unknown Task';
+  //     const projectName = project?.name || 'Unknown Project';
       
-      startScreenshotting(activeTimeTrack.task_id, taskName, projectName);
+  //     startScreenshotting(activeTimeTrack.task_id, taskName, projectName);
       
-      // Resume screenshot loading
-      const load = async () => {
-        try {
-          const data = await getScreenshots(activeTimeTrack.task_id);
-          setScreenshots(data || []);
-          console.log(`📸 Resumed with ${data?.length || 0} screenshots for task ${activeTimeTrack.task_id}`);
-        } catch (error) {
-          console.log('Error loading screenshots:', error);
-        }
-      };
-      load();
-      if (screenshotListRef.current) clearInterval(screenshotListRef.current);
-      screenshotListRef.current = setInterval(load, 120000);
-    }
+  //     // Resume screenshot loading
+  //     const load = async () => {
+  //       try {
+  //         const data = await getScreenshots(activeTimeTrack.task_id);
+  //         setScreenshots(data || []);
+  //         // console.log(`📸 Resumed with ${data?.length || 0} screenshots for task ${activeTimeTrack.task_id}`);
+  //       } catch (error) {
+  //         // console.log('Error loading screenshots:', error);
+  //       }
+  //     };
+  //     load();
+  //     if (screenshotListRef.current) clearInterval(screenshotListRef.current);
+  //     screenshotListRef.current = setInterval(load, 120000);
+  //   }
     
-    saveTimerState();
-    console.log(`▶️ Timer resumed from ${formatTime(time)}`);
-    if (taskCapSeconds > 0) {
-      const remainingMs = Math.max(0, (taskCapSeconds - taskTrackedSeconds - time) * 1000);
-      if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
-      autoStopTimeoutRef.current = setTimeout(() => {
-        console.log('⏰ Auto-stop timeout (resume) fired');
-        stopTimer();
-      }, remainingMs + 500);
-    }
-  };
+  //   saveTimerState();
+  //   // console.log(`▶️ Timer resumed from ${formatTime(time)}`);
+  //   if (taskCapSeconds > 0) {
+  //     const remainingMs = Math.max(0, (taskCapSeconds - taskTrackedSeconds - time) * 1000);
+  //     if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
+  //     autoStopTimeoutRef.current = setTimeout(() => {
+  //       // console.log('⏰ Auto-stop timeout (resume) fired');
+  //       stopTimer();
+  //     }, remainingMs + 500);
+  //   }
+  //   const sendHeartbeat = async () => { try { await timeTrackService.heartbeat(); } catch {} };
+  //   if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+  //   sendHeartbeat();
+  //   heartbeatRef.current = setInterval(sendHeartbeat, 10000);
+  // };
 
   const stopTimer = async () => {
     if (!activeTimeTrack || !activeTimeTrack.id) {
@@ -694,7 +769,7 @@ const TimeTracker = () => {
       setActiveTimeTrack(null);
       activeTrackIdRef.current = null;
       
-      const finalTime = time;
+      // const finalTime = time;
       setTime(0);
       setTaskTimeLimit(0);
       setResumedTime(0);
@@ -719,20 +794,22 @@ const TimeTracker = () => {
       if (hardStopTimeoutRef.current) { clearTimeout(hardStopTimeoutRef.current); hardStopTimeoutRef.current = null; }
       isStoppingRef.current = false;
       clearTimerState(); // Clear saved state
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
       
-      console.log(`✅ Timer stopped. Final time: ${formatTime(finalTime)}`);
+      // console.log(`✅ Timer stopped. Final time: ${formatTime(finalTime)}`);
       
       await loadHistory(); // Refresh to get updated today's total
       if (startForm.task_id) {
         await refreshTaskLimitInfo(startForm.task_id); // Refresh weekly cap/tracked for selected task
       }
     } catch (error) {
-      console.error('Stop timer error:', error);
+      // console.error('Stop timer error:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  /*
   const testScreenshot = async () => {
     if (!startForm.task_id) {
       alert('Please select a task first!');
@@ -748,7 +825,7 @@ const TimeTracker = () => {
       // Try screen capture first
       if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
         try {
-          console.log('Attempting screen capture for test...');
+          // console.log('Attempting screen capture for test...');
           
           const stream = await navigator.mediaDevices.getDisplayMedia({
             video: {
@@ -809,12 +886,12 @@ const TimeTracker = () => {
               });
               
               alert(`✅ Screen capture test successful: ${filename}`);
-              console.log('Screenshot upload response:', response.data);
+              // console.log('Screenshot upload response:', response.data);
               
               const data = await getScreenshots(parseInt(startForm.task_id));
               setScreenshots(data || []);
             } catch (error) {
-              console.error('Screenshot upload error:', error);
+              // console.error('Screenshot upload error:', error);
               alert('❌ Failed to upload screenshot: ' + (error.response?.data?.message || error.message));
             }
           }, 'image/png');
@@ -822,7 +899,7 @@ const TimeTracker = () => {
           return; // Success with screen capture
           
         } catch (screenError) {
-          console.log('Screen capture denied or failed, using page capture...');
+          // console.log('Screen capture denied or failed, using page capture...');
           alert('🚫 Screen capture denied. Using page capture instead.');
         }
       }
@@ -874,21 +951,22 @@ const TimeTracker = () => {
           });
           
           alert(`✅ Page capture test successful: ${filename}`);
-          console.log('Screenshot upload response:', response.data);
+          // console.log('Screenshot upload response:', response.data);
           
           const data = await getScreenshots(parseInt(startForm.task_id));
           setScreenshots(data || []);
         } catch (error) {
-          console.error('Screenshot upload error:', error);
+          // console.error('Screenshot upload error:', error);
           alert('❌ Failed to upload screenshot: ' + (error.response?.data?.message || error.message));
         }
       }, 'image/png');
       
     } catch (error) {
-      console.error('Screenshot capture error:', error);
+      // console.error('Screenshot capture error:', error);
       alert('❌ Failed to capture screenshot: ' + error.message);
     }
   };
+  */
 
   return (
     <div className="time-tracker">
@@ -928,18 +1006,10 @@ const TimeTracker = () => {
             <div className="stat-item" style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>🎯 Estimate</div>
               <div style={{ fontSize: '1.1rem', fontWeight: 'bold', marginTop: '0.3rem' }}>
-                {`${Math.floor((taskTrackedSeconds + ((isTracking && activeTimeTrack?.task_id && String(activeTimeTrack.task_id) === String(startForm.task_id)) ? time : 0)) / 3600)} / ${Math.floor(taskCapSeconds / 3600)} hours`}
+                {`${formatTime(taskTrackedSeconds + ((isTracking && activeTimeTrack?.task_id && String(activeTimeTrack.task_id) === String(startForm.task_id)) ? time : 0))} / ${formatTime(taskCapSeconds)}`}
               </div>
               <div style={{ fontSize: '0.7rem', opacity: 0.8 }}>
                 {Math.min(100, Math.floor(((taskTrackedSeconds + ((isTracking && activeTimeTrack?.task_id && String(activeTimeTrack.task_id) === String(startForm.task_id)) ? time : 0)) / Math.max(1, taskCapSeconds)) * 100))}% used
-              </div>
-            </div>
-          )}
-          {resumedTime > 0 && !isTracking && (
-            <div className="stat-item" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>🔄 Resume From</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', marginTop: '0.3rem' }}>
-                {formatTime(resumedTime)}
               </div>
             </div>
           )}
@@ -1108,43 +1178,6 @@ const TimeTracker = () => {
           </form>
         ) : (
           <div className="timer-controls">
-            {isTracking ? (
-              <button 
-                onClick={pauseTimer} 
-                disabled={loading}
-                style={{
-                  background: 'linear-gradient(45deg, #f39c12, #e67e22)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '0.75rem 1.5rem',
-                  fontSize: '1rem',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  marginRight: '0.5rem'
-                }}
-              >
-                ⏸️ Pause
-              </button>
-            ) : (
-              <button 
-                onClick={resumeTimer} 
-                disabled={loading}
-                style={{
-                  background: 'linear-gradient(45deg, #27ae60, #2ecc71)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '0.75rem 1.5rem',
-                  fontSize: '1rem',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  marginRight: '0.5rem'
-                }}
-              >
-                ▶️ Resume
-              </button>
-            )}
             <button 
               onClick={stopTimer} 
               disabled={loading}
@@ -1156,7 +1189,8 @@ const TimeTracker = () => {
                 padding: '0.75rem 1.5rem',
                 fontSize: '1rem',
                 fontWeight: '600',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                width: '100%'
               }}
             >
               🛑 Stop & Save
@@ -1168,7 +1202,7 @@ const TimeTracker = () => {
       <div className="history-section">
         <h3>Screenshots {activeTimeTrack?.task_id ? `(Task ID: ${activeTimeTrack.task_id})` : ''}</h3>
         <div style={{ marginBottom: '1rem', textAlign: 'center' }}>
-          <button 
+          {/* <button 
             onClick={testScreenshot}
             style={{
               padding: '0.5rem 1rem',
@@ -1183,17 +1217,17 @@ const TimeTracker = () => {
             }}
           >
             🖥️ Test Screen Capture (VS Code, etc.)
-          </button>
+          </button> */}
           {activeTimeTrack?.task_id && (
             <button 
               onClick={async () => {
                 try {
                   const data = await getScreenshots(activeTimeTrack.task_id);
                   setScreenshots(data || []);
-                  console.log('🔄 Screenshots refreshed:', data?.length || 0);
+                  // console.log('🔄 Screenshots refreshed:', data?.length || 0);
                   alert(`📸 Found ${data?.length || 0} screenshots for task ${activeTimeTrack.task_id}`);
                 } catch (error) {
-                  console.error('Error refreshing screenshots:', error);
+                  // console.error('Error refreshing screenshots:', error);
                   alert('❌ Error loading screenshots: ' + error.message);
                 }
               }}
@@ -1213,7 +1247,10 @@ const TimeTracker = () => {
           )}
         </div>
         <div className="screenshot-gallery">
-          {screenshots.map((s) => (
+          {[...screenshots]
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .slice(0, 1)
+            .map((s) => (
             <div key={s.id} className="screenshot-card">
               <img
                 src={getStorageUrl(s.image_path)}
@@ -1252,7 +1289,10 @@ const TimeTracker = () => {
             </tr>
           </thead>
           <tbody>
-            {history.map((h) => (
+            {history
+              .sort((a, b) => new Date(b.start_time) - new Date(a.start_time))
+              .slice(0, 1)
+              .map((h) => (
               <tr key={h.id}>
                 <td>{h.start_time ? new Date(h.start_time).toLocaleString() : ''}</td>
                 <td>{h.end_time ? new Date(h.end_time).toLocaleString() : ''}</td>

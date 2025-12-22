@@ -13,6 +13,26 @@ class TimeTrackController extends Controller
 {
     public function index(Request $request)
     {
+        // Cleanup stale active tracks (logic mirrored from active() method)
+        // This ensures the list doesn't show "Active" for abandoned sessions
+        try {
+            $actives = TimeTrack::whereNull('end_time')->get();
+            $threshold = now('Asia/Kolkata')->subSeconds(60);
+            foreach ($actives as $active) {
+                $lastBeat = $active->updated_at ?? $active->start_time;
+                if ($lastBeat < $threshold) {
+                    $finalEnd = $lastBeat;
+                    if ($finalEnd < $active->start_time) {
+                        $finalEnd = now('Asia/Kolkata');
+                    }
+                    $active->end_time = $finalEnd;
+                    $active->save();
+                }
+            }
+        } catch (\Throwable $e) {
+            // Ignore cleanup errors to ensure list still loads
+        }
+
         $user = auth()->user();
         $query = TimeTrack::query();
 
@@ -59,10 +79,17 @@ class TimeTrackController extends Controller
                 $taskA = Task::find($active->task_id);
                 if ($taskA && !empty($taskA->estimated_hours)) {
                     $capSecondsA = ((int) $taskA->estimated_hours) * 3600;
-                    $beforeSumA = TimeTrack::where('user_id', auth()->id())
+                    $beforeQueryA = TimeTrack::where('user_id', auth()->id())
                         ->where('task_id', $taskA->id)
-                        ->where('id', '!=', $active->id)
-                        ->sum('duration_seconds');
+                        ->where('id', '!=', $active->id);
+                    if (($taskA->time_reset_policy ?? 'fixed') === 'per_week') {
+                        $startOfWeekA = now('Asia/Kolkata')->startOfWeek();
+                        $endOfWeekA = now('Asia/Kolkata')->endOfWeek();
+                        $beforeQueryA->whereBetween('start_time', [$startOfWeekA, $endOfWeekA]);
+                    }
+                    $beforeSumA = (int) ($beforeQueryA
+                        ->selectRaw('SUM(GREATEST(0, COALESCE(duration_seconds, TIMESTAMPDIFF(SECOND, start_time, end_time)))) as total_seconds')
+                        ->value('total_seconds') ?? 0);
                     $remainingA = max(0, $capSecondsA - $beforeSumA);
                     if ($duration > $remainingA) {
                         $duration = $remainingA;
@@ -105,9 +132,16 @@ class TimeTrackController extends Controller
             }
             if ($task && !empty($task->estimated_hours)) {
                 $capSeconds = ((int) $task->estimated_hours) * 3600;
-                $trackedSeconds = TimeTrack::where('user_id', auth()->id())
-                    ->where('task_id', $task->id)
-                    ->sum('duration_seconds');
+                $trackedQuery = TimeTrack::where('user_id', auth()->id())
+                    ->where('task_id', $task->id);
+                if (($task->time_reset_policy ?? 'fixed') === 'per_week') {
+                    $startOfWeek = now('Asia/Kolkata')->startOfWeek();
+                    $endOfWeek = now('Asia/Kolkata')->endOfWeek();
+                    $trackedQuery->whereBetween('start_time', [$startOfWeek, $endOfWeek]);
+                }
+                $trackedSeconds = (int) ($trackedQuery
+                    ->selectRaw('SUM(GREATEST(0, COALESCE(duration_seconds, TIMESTAMPDIFF(SECOND, start_time, end_time)))) as total_seconds')
+                    ->value('total_seconds') ?? 0);
                 if ($trackedSeconds >= $capSeconds) {
                     return response()->json([
                         'message' => 'Time limit reached for this task',
@@ -156,10 +190,17 @@ class TimeTrackController extends Controller
             $task = Task::find($timeTrack->task_id);
             if ($task && !empty($task->estimated_hours)) {
                 $capSeconds = ((int) $task->estimated_hours) * 3600;
-                $beforeSum = TimeTrack::where('user_id', auth()->id())
+                $beforeQuery = TimeTrack::where('user_id', auth()->id())
                     ->where('task_id', $task->id)
-                    ->where('id', '!=', $timeTrack->id)
-                    ->sum('duration_seconds');
+                    ->where('id', '!=', $timeTrack->id);
+                if (($task->time_reset_policy ?? 'fixed') === 'per_week') {
+                    $startOfWeek = now('Asia/Kolkata')->startOfWeek();
+                    $endOfWeek = now('Asia/Kolkata')->endOfWeek();
+                    $beforeQuery->whereBetween('start_time', [$startOfWeek, $endOfWeek]);
+                }
+                $beforeSum = (int) ($beforeQuery
+                    ->selectRaw('SUM(GREATEST(0, COALESCE(duration_seconds, TIMESTAMPDIFF(SECOND, start_time, end_time)))) as total_seconds')
+                    ->value('total_seconds') ?? 0);
                 $remaining = max(0, $capSeconds - $beforeSum);
                 if ($duration > $remaining) {
                     // Trim end_time to fit remaining
@@ -210,6 +251,20 @@ class TimeTrackController extends Controller
             ->whereNull('end_time')
             ->with('task', 'project')
             ->first();
+        if ($activeTimer) {
+            $threshold = now('Asia/Kolkata')->subSeconds(60);
+            $lastBeat = $activeTimer->updated_at ?? $activeTimer->start_time;
+            if ($lastBeat < $threshold) {
+                $finalEnd = $lastBeat;
+                if ($finalEnd < $activeTimer->start_time) {
+                    $finalEnd = now('Asia/Kolkata');
+                }
+                $activeTimer->end_time = $finalEnd;
+                // duration_seconds will be recalculated in model saving hook
+                $activeTimer->save();
+                $activeTimer = null;
+            }
+        }
 
         return response()->json($activeTimer);
     }
@@ -324,6 +379,20 @@ class TimeTrackController extends Controller
             'message' => 'Time tracked successfully',
             'time_track' => $timeTrack,
         ], 201);
+    }
+
+    public function heartbeat(Request $request)
+    {
+        $track = TimeTrack::where('user_id', auth()->id())
+            ->whereNull('end_time')
+            ->orderBy('start_time', 'desc')
+            ->first();
+        if (!$track) {
+            return response()->json(['status' => 'no_active']);
+        }
+        // Update the updated_at timestamp to mark recent activity/online presence
+        $track->touch();
+        return response()->json(['status' => 'ok', 'updated_at' => $track->updated_at]);
     }
 
     public function getReport(Request $request)

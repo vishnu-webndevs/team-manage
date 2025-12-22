@@ -34,9 +34,9 @@ const postSession = async (endTs) => {
       headers,
       body: JSON.stringify(payload),
     });
-    console.log('[TM] session posted', payload);
+  //  console.log('[TM] session posted', payload);
   } catch (e) {
-    console.log('[TM] post session failed', e);
+  //  console.log('[TM] post session failed', e);
   }
 };
 
@@ -50,7 +50,7 @@ const startNewSession = async (tab) => {
   session.title = tab?.title || '';
   session.keyboard = 0;
   session.mouse = 0;
-  console.log('[TM] new session', session);
+//  console.log('[TM] new session', session);
 };
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -74,7 +74,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               files: ['content.js'],
             });
           } catch (e) {
-            console.log('[TM] inject failed', e?.message || e);
+          //  console.log('[TM] inject failed', e?.message || e);
           }
         });
       });

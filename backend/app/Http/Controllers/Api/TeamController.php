@@ -53,7 +53,11 @@ class TeamController extends Controller
 
     public function update(Request $request, Team $team)
     {
-        if (!auth()->user()->hasRole('admin') && !auth()->user()->hasRole('project_manager') && auth()->id() !== $team->owner_id) {
+        $user = auth()->user();
+        $isGlobalAdmin = $user->hasRole('admin') || $user->hasRole('project_manager');
+        $isOwner = $user->id === $team->owner_id;
+        $isTeamAdmin = \App\Models\TeamMember::where('team_id', $team->id)->where('user_id', $user->id)->where('role', 'admin')->exists();
+        if (!$isGlobalAdmin && !$isOwner && !$isTeamAdmin) {
             return response()->json(['message' => 'Unauthorized. Only admin, project managers, or team owner can update teams.'], 403);
         }
 
@@ -83,7 +87,11 @@ class TeamController extends Controller
 
     public function addMember(Request $request, Team $team)
     {
-        if (!auth()->user()->hasRole('admin') && !auth()->user()->hasRole('project_manager') && auth()->id() !== $team->owner_id) {
+        $user = auth()->user();
+        $isGlobalAdmin = $user->hasRole('admin') || $user->hasRole('project_manager');
+        $isOwner = $user->id === $team->owner_id;
+        $isTeamAdmin = \App\Models\TeamMember::where('team_id', $team->id)->where('user_id', $user->id)->where('role', 'admin')->exists();
+        if (!$isGlobalAdmin && !$isOwner && !$isTeamAdmin) {
             return response()->json(['message' => 'Unauthorized. Only admin, project managers, or team owner can manage members.'], 403);
         }
 
@@ -115,7 +123,11 @@ class TeamController extends Controller
 
     public function removeMember(Request $request, Team $team)
     {
-        if (!auth()->user()->hasRole('admin') && !auth()->user()->hasRole('project_manager') && auth()->id() !== $team->owner_id) {
+        $user = auth()->user();
+        $isGlobalAdmin = $user->hasRole('admin') || $user->hasRole('project_manager');
+        $isOwner = $user->id === $team->owner_id;
+        $isTeamAdmin = \App\Models\TeamMember::where('team_id', $team->id)->where('user_id', $user->id)->where('role', 'admin')->exists();
+        if (!$isGlobalAdmin && !$isOwner && !$isTeamAdmin) {
             return response()->json(['message' => 'Unauthorized. Only admin, project managers, or team owner can manage members.'], 403);
         }
 

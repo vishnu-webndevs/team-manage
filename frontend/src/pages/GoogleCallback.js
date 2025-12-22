@@ -16,7 +16,7 @@ const GoogleCallback = () => {
             loginWithToken(token);
             navigate('/dashboard');
         } else if (error) {
-            console.error('Google login error:', error);
+            // console.error('Google login error:', error);
             navigate('/login?error=' + encodeURIComponent(error));
         } else {
             navigate('/login');

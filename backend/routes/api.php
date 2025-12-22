@@ -27,6 +27,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::put('/auth/me', [AuthController::class, 'updateMe']);
     Route::post('/auth/change-password', [AuthController::class, 'changePassword']);
+    Route::delete('/auth/me', [AuthController::class, 'deleteMe']);
     Route::post('/email/resend', [AuthController::class, 'resendVerificationEmail']);
     Route::get('/users', [AuthController::class, 'getAllUsers']);
 
@@ -79,6 +80,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/time-tracks/active', [TimeTrackController::class, 'active']);
     Route::get('/time-tracks/remaining', [TimeTrackController::class, 'remaining']);
     Route::get('/time-tracks/report', [TimeTrackController::class, 'getReport']);
+    Route::post('/time-tracks/heartbeat', [TimeTrackController::class, 'heartbeat']);
 
     // Chat Groups
     Route::get('/chat-groups', [ChatGroupController::class, 'index']);

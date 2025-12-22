@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api, { getStorageUrl } from '../services/api';
 import activityTracker from '../services/activityTracker';
 import { projectService, taskService, timeTrackService, screenshotService, activityService } from '../services';
@@ -32,11 +33,19 @@ const TrackerMonitorPage = () => {
         setProjects(pRes.data?.data || []);
         setTasks(tRes.data?.data || []);
       } catch (e) {
-        console.error('Failed to load projects/tasks', e);
+        // console.error('Failed to load projects/tasks', e);
       }
     };
     loadMeta();
   }, []);
+  
+  useEffect(() => {
+    if (selectedTrack) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [selectedTrack]);
 
   useEffect(() => {
     let pollId = null;
@@ -68,7 +77,7 @@ const TrackerMonitorPage = () => {
       setScreenshots(shots);
       setSessions((sessionsRes.data?.data) || (Array.isArray(sessionsRes.data) ? sessionsRes.data : []));
     } catch (error) {
-      console.error('Error loading data:', error);
+      // console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
@@ -191,6 +200,41 @@ const TrackerMonitorPage = () => {
       totalMouse,
       avgActivity,
       screenshotCount: taskScreenshots.length
+    };
+  };
+
+  const calculateTrackActivityStats = (track) => {
+    if (!track) return null;
+    const startTime = new Date(track.start_time).getTime();
+    const endTime = track.end_time ? new Date(track.end_time).getTime() : Date.now();
+
+    const trackScreenshots = screenshots.filter(s => {
+      if (String(s.task_id) !== String(track.task_id)) return false;
+      const shotTime = new Date(s.created_at).getTime();
+      return shotTime >= startTime && shotTime <= endTime;
+    });
+
+    if (trackScreenshots.length === 0) return null;
+
+    const totalKeyboard = trackScreenshots.reduce((sum, s) => {
+      const totals = computeScreenshotTotals(s);
+      return sum + totals.keyboard;
+    }, 0);
+    const totalMouse = trackScreenshots.reduce((sum, s) => {
+      const totals = computeScreenshotTotals(s);
+      return sum + totals.mouse;
+    }, 0);
+    const avgActivityRaw = trackScreenshots.reduce((sum, s) => {
+      const v = Number(s.activity_percentage ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0) / trackScreenshots.length;
+    const avgActivity = Number.isFinite(avgActivityRaw) ? Math.round(avgActivityRaw * 10) / 10 : 0;
+
+    return {
+      totalKeyboard,
+      totalMouse,
+      avgActivity,
+      screenshotCount: trackScreenshots.length
     };
   };
 
@@ -318,12 +362,14 @@ const TrackerMonitorPage = () => {
         >
           📸 Screenshots
         </button>
-        <button 
-          className={`tab-button ${activeTab === 'sessions' ? 'active' : ''}`}
-          onClick={() => setActiveTab('sessions')}
-        >
-          🪟 Sessions
-        </button>
+    
+        {/* <button 
+                className={`tab-button ${activeTab === 'sessions' ? 'active' : ''}`}
+                onClick={() => setActiveTab('sessions')}
+              >
+                🪟 Sessions
+              </button> */}
+        
       </div>
 
       {activeTab === 'time-tracks' && (
@@ -361,7 +407,7 @@ const TrackerMonitorPage = () => {
               </thead>
               <tbody>
                 {tracks.map(track => {
-                  const activityStats = calculateTaskActivityStats(track.task_id);
+                  const activityStats = calculateTrackActivityStats(track);
                   return (
                     <tr key={track.id} className={!track.end_time ? 'active-track' : ''}>
                       <td>
@@ -591,8 +637,7 @@ const TrackerMonitorPage = () => {
       )}
 
      
-      {/* Track Detail Modal */}
-      {selectedTrack && (
+      {selectedTrack && createPortal(
         <div className="modal-overlay" onClick={() => setSelectedTrack(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
@@ -617,7 +662,6 @@ const TrackerMonitorPage = () => {
                   <strong>Description:</strong> {selectedTrack.description || '-'}
                 </div>
               </div>
-              
               {(() => {
                 const taskScreenshots = getTaskScreenshots(selectedTrack.task_id);
                 return (
@@ -654,11 +698,11 @@ const TrackerMonitorPage = () => {
                     </div>
                   </div>
                 );
-              })()
-              }
+              })()}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

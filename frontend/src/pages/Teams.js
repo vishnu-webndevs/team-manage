@@ -8,6 +8,9 @@ export const Teams = () => {
     const [teams, setTeams] = useState([]);
     const [showForm, setShowForm] = useState(false);
     const [formData, setFormData] = useState({ name: '', description: '' });
+    const [selectedMemberIds, setSelectedMemberIds] = useState([]);
+    const [memberSearch, setMemberSearch] = useState('');
+    const [memberDropdownOpen, setMemberDropdownOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [editTeamId, setEditTeamId] = useState(null);
@@ -29,8 +32,7 @@ export const Teams = () => {
             const response = await teamService.getTeams();
             setTeams(response.data.data);
         } catch (error) {
-            setError('Failed to fetch teams');
-            console.error(error);
+            // console.error(error);
         }
     };
 
@@ -40,7 +42,7 @@ export const Teams = () => {
             const list = res.data?.data || res.data || [];
             setUsers(list);
         } catch (error) {
-            console.error('Failed to fetch users', error);
+            // console.error('Failed to fetch users', error);
         }
     };
 
@@ -50,8 +52,18 @@ export const Teams = () => {
         setError('');
 
         try {
-            await teamService.createTeam(formData);
+            const created = await teamService.createTeam(formData);
+            const createdTeam = created.data?.team || created.data;
+            const teamId = createdTeam?.id;
+            if (teamId && Array.isArray(selectedMemberIds) && selectedMemberIds.length > 0) {
+                for (const uid of selectedMemberIds) {
+                    try {
+                        await teamService.addMember(teamId, { user_id: uid, role: 'member' });
+                    } catch (err) {}
+                }
+            }
             setFormData({ name: '', description: '' });
+            setSelectedMemberIds([]);
             setShowForm(false);
             fetchTeams();
         } catch (error) {
@@ -167,6 +179,89 @@ export const Teams = () => {
                             rows={4}
                         />
                     </div>
+                    <div className="form-group">
+                        <label>Initial Members</label>
+                        <div className="multi-select-dropdown">
+                            <button
+                                type="button"
+                                className="dropdown-toggle"
+                                onClick={() => setMemberDropdownOpen(!memberDropdownOpen)}
+                            >
+                                {(() => {
+                                    const selected = (selectedMemberIds || []).map(id => {
+                                        const u = (users || []).find(uu => String(uu.id) === String(id));
+                                        return u ? u.name : id;
+                                    });
+                                    if (selected.length === 0) return 'Select members';
+                                    const show = selected.slice(0, 3);
+                                    const more = selected.length - show.length;
+                                    return (
+                                        <span className="chips-inline">
+                                            {show.map((name, idx) => {
+                                                const parts = String(name || '').trim().split(/\s+/);
+                                                const initials = parts.slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
+                                                return (
+                                                    <span key={idx} className="chip">
+                                                        <span className="chip-avatar">{initials}</span>
+                                                        <span className="chip-label">{name}</span>
+                                                    </span>
+                                                );
+                                            })}
+                                            {more > 0 && <span className="chip chip-more">+{more}</span>}
+                                        </span>
+                                    );
+                                })()}
+                            </button>
+                            {memberDropdownOpen && (
+                                <div className="dropdown-menu" onMouseDown={(e) => e.preventDefault()}>
+                                    
+                                    <div className="multi-select-grid">
+                                        {(users || []).filter(u => String(u.name || '').toLowerCase().includes(memberSearch.toLowerCase())).map(u => {
+                                            const idStr = String(u.id);
+                                            const checked = selectedMemberIds.includes(idStr);
+                                            return (
+                                                <label key={u.id} className={`multi-option ${checked ? 'selected' : ''}`}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={(e) => {
+                                                            const next = new Set(selectedMemberIds);
+                                                            if (e.target.checked) next.add(idStr); else next.delete(idStr);
+                                                            setSelectedMemberIds(Array.from(next));
+                                                        }}
+                                                    />
+                                                    <span className="multi-option-name">{u.name}</span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="multi-select-actions">
+                                        {/* <input
+                                            type="text"
+                                            placeholder="Search users..."
+                                            value={memberSearch}
+                                            onChange={(e) => setMemberSearch(e.target.value)}
+                                        /> */}
+                                        <div className="multi-select-meta">
+                                            {/* <span>Selected: {selectedMemberIds.length}</span> */}
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const filtered = (users || []).filter(u => String(u.name || '').toLowerCase().includes(memberSearch.toLowerCase()));
+                                                    const allIds = filtered.map(u => String(u.id));
+                                                    setSelectedMemberIds(allIds);
+                                                }}
+                                            >
+                                                Select All
+                                            </button>
+                                            <button type="button" onClick={() => setSelectedMemberIds([])}>Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="hint-text">Select members when creating a team (role: member)</div>
+                    </div>
                     <button type="submit" disabled={loading}>
                         {loading ? 'Creating Team...' : 'Create Team'}
                     </button>
@@ -260,11 +355,17 @@ export const Teams = () => {
                                                         <button type="button" onClick={() => handleAddMemberToTeam(editTeamId)} disabled={loading || !memberUserId}>Add</button>
                                                     </div>
                                                     {(team.members || []).length > 0 && (
-                                                        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                        <div className="member-list">
                                                             {(team.members || []).map(m => (
-                                                                <span key={m.id} style={{ background: '#f3f4f6', borderRadius: 14, padding: '0.25rem 0.5rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-                                                                    {m.name}
-                                                                    <button type="button" className="btn-danger" onClick={() => handleRemoveMemberFromTeam(editTeamId, m.id)}>Remove</button>
+                                                                <span key={m.id} className="member-chip">
+                                                                    <span className="member-name">{m.name}</span>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="member-remove"
+                                                                        onClick={() => handleRemoveMemberFromTeam(editTeamId, m.id)}
+                                                                    >
+                                                                        ✕
+                                                                    </button>
                                                                 </span>
                                                             ))}
                                                         </div>

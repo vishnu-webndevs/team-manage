@@ -12,6 +12,7 @@ export const authService = {
     getUsers: () => api.get('/users'),
     updateMe: (data) => api.put('/auth/me', data),
     changePassword: (data) => api.post('/auth/change-password', data),
+    deleteMe: () => api.delete('/auth/me'),
 };
 
 export const teamService = {
@@ -50,6 +51,7 @@ export const timeTrackService = {
     createTimeTrack: (data) => api.post('/time-tracks', data),
     getReport: (params = {}) => api.get('/time-tracks/report', { params }),
     getRemaining: (taskId, params = {}) => api.get('/time-tracks/remaining', { params: { task_id: taskId, ...params } }),
+    heartbeat: () => api.post('/time-tracks/heartbeat'),
 };
 
 export const chatService = {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import api from '../services/api';
 import { notificationService } from '../services';
 import { format } from 'date-fns';
 import '../styles/notifications.css';
@@ -26,7 +27,7 @@ const Notifications = () => {
             
             setHasMore(response.data.next_page_url !== null);
         } catch (error) {
-            console.error('Failed to fetch notifications', error);
+        // console.errorror('Failed to fetch notifications', error);
         } finally {
             setLoading(false);
         }
@@ -39,26 +40,26 @@ const Notifications = () => {
                 n.id === id ? { ...n, read_at: new Date().toISOString() } : n
             ));
         } catch (error) {
-            console.error('Failed to mark as read', error);
+            // console.error('Failed to mark as read', error);
         }
     };
 
     const handleMarkAllAsRead = async () => {
         try {
-            await notificationService.markAllAsRead();
+            await api.post('/notifications/mark-all-read');
             setNotifications(notifications.map(n => ({ ...n, read_at: new Date().toISOString() })));
         } catch (error) {
-            console.error('Failed to mark all as read', error);
+            // console.error('Failed to mark all as read', error);
         }
     };
 
     const handleDelete = async (id) => {
         if (!window.confirm('Are you sure you want to delete this notification?')) return;
         try {
-            await notificationService.deleteNotification(id);
+            await api.delete(`/notifications/${id}`);
             setNotifications(notifications.filter(n => n.id !== id));
         } catch (error) {
-            console.error('Failed to delete notification', error);
+            // console.error('Failed to delete notification', error);
         }
     };
 

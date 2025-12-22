@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import activityTracker from '../services/activityTracker';
 import '../styles/layout.css';
 
 const Layout = ({ children }) => {
@@ -14,7 +15,7 @@ const Layout = ({ children }) => {
             await logout();
             navigate('/login');
         } catch (error) {
-            console.error('Logout failed', error);
+        // console.error('Logout failed', error);
         }
     };
 
@@ -52,6 +53,11 @@ const Layout = ({ children }) => {
             };
             meta.setAttribute('content', `Team Manage — ${descMap[pageTitle] || 'Manage your work and tracking'}`);
         }
+        
+        // Report activity to main tracker if running in another tab
+        activityTracker.enableReportingOnly();
+        activityTracker.reportPresence();
+        
     }, [location.pathname]);
 
     return (

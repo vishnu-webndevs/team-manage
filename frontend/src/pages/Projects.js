@@ -37,7 +37,7 @@ export const Projects = () => {
             setProjects(response.data.data);
         } catch (error) {
             setError('Failed to fetch projects');
-            console.error(error);
+            // console.error(error);
         }
     };
 
@@ -46,7 +46,7 @@ export const Projects = () => {
             const response = await teamService.getTeams();
             setTeams(response.data.data);
         } catch (error) {
-            console.error('Failed to fetch teams', error);
+        // console.error('Failed to fetch teams', error);
         }
     };
 

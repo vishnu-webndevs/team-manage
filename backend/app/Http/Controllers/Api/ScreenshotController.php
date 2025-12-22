@@ -106,7 +106,7 @@ class ScreenshotController extends Controller
             $query->where('task_id', $request->input('task_id'));
         }
         
-        $screenshots = $query->paginate(20);
+        $screenshots = $query->paginate(21);
         
         return response()->json($screenshots);
     }
@@ -163,7 +163,7 @@ class ScreenshotController extends Controller
             });
         }
         
-        $screenshots = $query->paginate(20);
+        $screenshots = $query->paginate(21);
         
         return response()->json($screenshots);
     }
@@ -197,8 +197,8 @@ class ScreenshotController extends Controller
         
         try {
             $monthYear = Carbon::now()->format('m-Y');
-            $safeUsername = Str::slug($user->name ?? 'user');
-            $basePath = "screenshots/{$monthYear}/{$safeUsername}";
+            // Use stable user-id based folder to avoid path changes on display name updates
+            $basePath = "screenshots/{$monthYear}/user-{$user->id}";
 
             $customFilename = $request->input('custom_filename');
             if ($customFilename) {

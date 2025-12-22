@@ -105,6 +105,120 @@
     border-color: #2ecc71;
 }
 
+.multi-select-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+.multi-select-dropdown {
+    position: relative;
+}
+.dropdown-toggle {
+    width: 100%;
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+    border: 1.5px solid #e5e7eb;
+    border-radius: 12px;
+    background: #fff;
+    color: #374151;
+}
+.dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 12px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+    padding: 0.6rem;
+}
+.chips-inline {
+    display: inline-flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem;
+}
+.chip-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+}
+.chip-label { color: #374151; font-weight: 600; font-size: 0.85rem; }
+.chip-more { background: #eef2ff; border-color: #e0e7ff; color: #4f46e5; }
+.dropdown-menu .multi-select-grid { max-height: 240px; overflow: auto; }
+.multi-select-actions input {
+    flex: 1;
+    min-width: 180px;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+}
+.multi-select-actions .multi-select-meta {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+.multi-select-actions .multi-select-meta button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.25);
+}
+.multi-select-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.5rem;
+}
+.multi-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.5rem 0.7rem;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.multi-option.selected {
+    border-color: #764ba2;
+    background: #eef2ff;
+}
+.multi-option input[type="checkbox"] {
+    width: auto;
+    height: auto;
+    flex: 0 0 auto;
+}
+.multi-option-name {
+    font-weight: 600;
+    color: #374151;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .task-form {
     background: white;
     padding: 2rem;

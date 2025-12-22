@@ -16,16 +16,39 @@ let lastExternalClickTs = 0;
 let lastExternalMoveTs = 0;
 let lastExternalKeyTs = 0;
 
+const generateRandomOffsets = (minOffset, maxOffset, count, minGapMs) => {
+  const randInt = (min, max) => {
+    const buf = new Uint32Array(1);
+    (window.crypto || window.msCrypto).getRandomValues(buf);
+    const range = max - min + 1;
+    return min + (buf[0] % range);
+  };
+  const offsets = [];
+  let tries = 0;
+  while (offsets.length < count && tries < 10000) {
+    const candidate = randInt(minOffset, maxOffset);
+    if (offsets.every(o => Math.abs(o - candidate) >= minGapMs)) {
+      offsets.push(candidate);
+    }
+    tries++;
+  }
+  return offsets.sort((a, b) => a - b);
+};
+
 // Function to get screen permission once and reuse
 const getScreenPermission = async () => {
-  if (hasScreenPermission && screenStream && screenStream.active) {
-    console.log('♻️ Reusing existing screen permission');
-    return screenStream;
+  // Check if we have a valid active stream
+  if (hasScreenPermission && screenStream) {
+    const tracks = screenStream.getVideoTracks();
+    if (tracks.length > 0 && tracks[0].readyState === 'live') {
+      // console.log('♻️ Reusing existing screen permission');
+      return screenStream;
+    }
   }
   
   try {
-    console.log('🔐 Requesting screen capture permission...');
-    console.log('📋 Please select "Entire Screen" when prompted!');
+    // console.log('🔐 Requesting screen capture permission...');
+    // console.log('📋 Please select "Entire Screen" when prompted!');
     
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: {
@@ -45,24 +68,24 @@ const getScreenPermission = async () => {
     // Log what type of screen was selected
     const videoTrack = screenStream.getVideoTracks()[0];
     const settings = videoTrack.getSettings();
-    console.log('✅ Screen permission granted:', {
-      displaySurface: settings.displaySurface,
-      width: settings.width,
-      height: settings.height,
-      deviceId: settings.deviceId
-    });
+    // console.log('✅ Screen permission granted:', {
+    //   displaySurface: settings.displaySurface,
+    //   width: settings.width,
+    //   height: settings.height,
+    //   deviceId: settings.deviceId
+    // });
     
     // Handle stream end (user stops sharing)
     videoTrack.addEventListener('ended', () => {
-      console.log('🛑 Screen sharing stopped by user');
+      // console.log('🛑 Screen sharing stopped by user');
       hasScreenPermission = false;
       screenStream = null;
     });
     
     return screenStream;
   } catch (error) {
-    console.log('❌ Screen permission denied or failed:', error.message);
-    console.log('💡 Make sure to select "Entire Screen" not "Application Window"!');
+    // console.log('❌ Screen permission denied or failed:', error.message);
+    // console.log('💡 Make sure to select "Entire Screen" not "Application Window"!');
     hasScreenPermission = false;
     screenStream = null;
     throw error;
@@ -144,41 +167,55 @@ const startExternalActivityMonitor = (stream) => {
   video.muted = true;
   video.autoplay = true;
   externalMonitorCanvas = document.createElement('canvas');
-  externalMonitorCanvas.width = 320;
-  externalMonitorCanvas.height = 180;
+  externalMonitorCanvas.width = 640;
+  externalMonitorCanvas.height = 360;
   externalMonitorCtx = externalMonitorCanvas.getContext('2d');
   const init = () => {
     externalMonitorId = setInterval(() => {
       try {
+        if (video.readyState < 2) return;
+        
         externalMonitorCtx.drawImage(video, 0, 0, externalMonitorCanvas.width, externalMonitorCanvas.height);
         const img = externalMonitorCtx.getImageData(0, 0, externalMonitorCanvas.width, externalMonitorCanvas.height);
         const data = img.data;
         let changed = 0;
         if (lastFrame && lastFrame.length === data.length) {
-          for (let i = 0; i < data.length; i += 4) {
-            const dr = Math.abs(data[i] - lastFrame[i]);
-            const dg = Math.abs(data[i + 1] - lastFrame[i + 1]);
-            const db = Math.abs(data[i + 2] - lastFrame[i + 2]);
-            const diff = (dr + dg + db) / 3;
-            if (diff > 30) changed++;
+          // Optimized loop - check every 2nd pixel to save CPU
+          for (let i = 0; i < data.length; i += 8) {
+            // Calculate sum of absolute differences (R+G+B)
+            const diff = Math.abs(data[i] - lastFrame[i]) + Math.abs(data[i+1] - lastFrame[i+1]) + Math.abs(data[i+2] - lastFrame[i+2]);
+            // Increased threshold to 120 (out of 765 max) to ignore video compression noise
+            if (diff > 120) changed++;
           }
-          const total = (data.length / 4);
-          const ratio = changed / total;
+          
           const now = Date.now();
-          if (ratio > 0.06 && now - lastExternalClickTs > 400) {
-            activityTracker.recordExternalClick();
-            lastExternalClickTs = now;
-          } else if (ratio > 0.04 && now - lastExternalKeyTs > 300) {
-            activityTracker.recordExternalTyping();
-            lastExternalKeyTs = now;
-          } else if (ratio > 0.02 && now - lastExternalMoveTs > 300) {
-            activityTracker.recordExternalMovement();
-            lastExternalMoveTs = now;
-          }
+          // Thresholds adjusted for 640x360 canvas (downscaled from screen)
+          // Typing: A char (10x20px on 1080p) -> ~20px on canvas -> ~10 detected (checking every 2nd pixel)
+          // Movement: Cursor moving creates a trail -> > 50 detected
+          // Click: Large UI changes -> > 500 detected
+          
+          // Ranges for activity detection (on 640x360 canvas, checking every 2nd pixel)
+                  // Typing: ~10-20 count (for a char). Range: 10 - 60.
+                  // Movement: ~60-100 count (cursor/highlight). Range: 60 - 1500.
+                  // Click: > 1500 count (large UI changes, popups, scrolls).
+                  
+                  if (changed > 10 && changed < 60 && now - lastExternalKeyTs > 100 && now - lastExternalClickTs > 300 && now - lastExternalMoveTs > 150) { 
+                    // Priority 1: Small changes are likely Typing (or small cursor moves, but we prioritize typing count)
+                    activityTracker.recordExternalTyping();
+                    lastExternalKeyTs = now;
+                  } else if (changed >= 60 && changed < 1500 && now - lastExternalMoveTs > 200) {
+                    // Priority 2: Medium changes are likely Movement
+                    activityTracker.recordExternalMovement();
+                    lastExternalMoveTs = now;
+                  } else if (changed >= 1500 && now - lastExternalClickTs > 400) {
+                    // Priority 3: Large changes are likely Clicks/Scrolls
+                    activityTracker.recordExternalClick();
+                    lastExternalClickTs = now;
+                  }
         }
         lastFrame = new Uint8ClampedArray(data);
       } catch {}
-    }, 700);
+    }, 100);
   };
   video.onloadedmetadata = () => {
     video.play().catch(() => {});
@@ -189,16 +226,16 @@ const startExternalActivityMonitor = (stream) => {
 const captureScreenshot = async (taskId, taskName, projectName, options = {}) => {
   const { allowPermissionPrompt = true } = options;
   try {
-    console.log('🎯 Starting screenshot capture process...');
+    // console.log('🎯 Starting screenshot capture process...');
     
     // Try to use persistent screen stream
     if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
       try {
-        console.log('📱 Attempting screen capture...');
+        // console.log('📱 Attempting screen capture...');
         let stream = null;
         if (hasScreenPermission && screenStream && screenStream.active) {
           stream = screenStream;
-          console.log('♻️ Using existing screen stream without prompt');
+          // console.log('♻️ Using existing screen stream without prompt');
         } else if (allowPermissionPrompt) {
           stream = await getScreenPermission();
         } else {
@@ -212,16 +249,16 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
         video.autoplay = true;
         video.muted = true;
         
-        console.log('⏳ Waiting for video metadata...');
+        // console.log('⏳ Waiting for video metadata...');
         // Wait for video to load
         await new Promise((resolve, reject) => {
           video.onloadedmetadata = () => {
-            console.log(`📹 Video ready: ${video.videoWidth}x${video.videoHeight}`);
-            console.log(`📹 Video state: readyState=${video.readyState}, currentTime=${video.currentTime}`);
+            // console.log(`📹 Video ready: ${video.videoWidth}x${video.videoHeight}`);
+            // console.log(`📹 Video state: readyState=${video.readyState}, currentTime=${video.currentTime}`);
             resolve();
           };
           video.onerror = (e) => {
-            console.error('❌ Video error:', e);
+            // console.error('❌ Video error:', e);
             reject(e);
           };
           // Add timeout to prevent hanging
@@ -231,9 +268,9 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
         // Force video to play and wait for first frame
         try {
           await video.play();
-          console.log('▶️ Video play() called');
+          // console.log('▶️ Video play() called');
         } catch (playError) {
-          console.log('⚠️ Video play failed (this is often normal):', playError.message);
+          // console.log('⚠️ Video play failed (this is often normal):', playError.message);
         }
         
         // Wait for video to have actual frame data - simplified approach
@@ -243,17 +280,17 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
         while (attempts < maxAttempts) {
           // Try to capture immediately regardless of currentTime
           if (video.readyState >= 2) {
-            console.log(`✅ Video has frame data after ${attempts * 100}ms, proceeding with capture`);
+            // console.log(`✅ Video has frame data after ${attempts * 100}ms, proceeding with capture`);
             break;
           }
           
-          console.log(`⏳ Attempt ${attempts + 1}: readyState=${video.readyState}`);
+          // console.log(`⏳ Attempt ${attempts + 1}: readyState=${video.readyState}`);
           await new Promise(resolve => setTimeout(resolve, 100));
           attempts++;
         }
         
         if (attempts >= maxAttempts) {
-          console.warn('⚠️ Video readyState never improved, but proceeding anyway');
+          //console.warn('⚠️ Video readyState never improved, but proceeding anyway');
         }
         
         // Small final delay
@@ -270,7 +307,7 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
           throw new Error('Invalid video dimensions - screen may be blocked');
         }
         
-        console.log(`🖼️ Capturing frame from ${baseCanvas.width}x${baseCanvas.height} video`);
+        // console.log(`🖼️ Capturing frame from ${baseCanvas.width}x${baseCanvas.height} video`);
         
         // Try multiple capture methods to ensure we get screen content
         let captureSuccess = false;
@@ -291,19 +328,19 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
           }
           
           if (hasPixelData) {
-            console.log('✅ Method 1: Direct capture successful - found pixel data');
+            // console.log('✅ Method 1: Direct capture successful - found pixel data');
             captureSuccess = true;
           } else {
-            console.log('⚠️ Method 1: Direct capture gave blank data, trying method 2');
+            // console.log('⚠️ Method 1: Direct capture gave blank data, trying method 2');
           }
         } catch (captureError) {
-          console.log('❌ Method 1: Direct capture failed:', captureError.message);
+          // console.log('❌ Method 1: Direct capture failed:', captureError.message);
         }
         
         // Method 2: Force refresh and retry
         if (!captureSuccess) {
           try {
-            console.log('🔄 Method 2: Refreshing video and retrying...');
+            // console.log('🔄 Method 2: Refreshing video and retrying...');
             
             // Clear and redraw
             ctx.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
@@ -316,15 +353,15 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
             // Try capture again
             ctx.drawImage(video, 0, 0);
             
-            console.log('✅ Method 2: Retry capture completed');
+            // console.log('✅ Method 2: Retry capture completed');
             captureSuccess = true;
           } catch (retryError) {
-            console.log('❌ Method 2: Retry capture failed:', retryError.message);
+            // console.log('❌ Method 2: Retry capture failed:', retryError.message);
           }
         }
         
         if (!captureSuccess) {
-          console.warn('⚠️ Both capture methods had issues, but proceeding with what we have');
+        //  console.warn('⚠️ Both capture methods had issues, but proceeding with what we have');
         }
         
         // Check if canvas is blank/black (sample center area for better detection)
@@ -354,11 +391,11 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
         const nonBlackRatio = nonBlackPixels / totalPixels;
         const avgBrightness = totalBrightness / totalPixels;
         
-        console.log(`🔍 Screen analysis: ${(nonBlackRatio * 100).toFixed(1)}% non-black pixels, avg brightness: ${avgBrightness.toFixed(1)}`);
+        // console.log(`🔍 Screen analysis: ${(nonBlackRatio * 100).toFixed(1)}% non-black pixels, avg brightness: ${avgBrightness.toFixed(1)}`);
         
         // More lenient detection - only fail if extremely dark
         if (nonBlackRatio < 0.05 && avgBrightness < 15) {
-          console.warn('🚫 Captured image appears completely black - trying page capture');
+          // console.warn('🚫 Captured image appears completely black - trying page capture');
           showNotification('⚠️ Dark Screen', 'Screen appears dark/black. Using page capture instead.', 'warning');
           throw new Error('Extremely dark screen detected');
         }
@@ -378,11 +415,11 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
 
         const { blob, ext } = await compressToUnder(baseCanvas, 100 * 1024);
         if (!blob || blob.size < 4000) {
-          console.warn(`⚠️ Blob too small (${blob ? blob.size : 0} bytes)`);
+          // console.warn(`⚠️ Blob too small (${blob ? blob.size : 0} bytes)`);
           throw new Error('Captured image too small');
         }
         const finalName = filename.replace(/\.jpg$/i, `.${ext}`);
-        console.log(`📤 Uploading REAL SCREEN (${ext.toUpperCase()}): ${finalName} (${Math.round(blob.size/1024)}KB)`);
+        // console.log(`📤 Uploading REAL SCREEN (${ext.toUpperCase()}): ${finalName} (${Math.round(blob.size/1024)}KB)`);
         const activityData = activityTracker.getActivityData();
         const formData = new FormData();
         formData.append('image', blob, finalName);
@@ -397,17 +434,17 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
         formData.append('activity_end_time', activityData.activity_end_time);
         formData.append('minute_breakdown', JSON.stringify(activityData.minute_breakdown));
         await api.post(`/screenshots`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-        console.log(`✅ REAL SCREEN capture successful: ${filename}`);
+        // console.log(`✅ REAL SCREEN capture successful: ${filename}`);
         showNotification('✅ REAL Screen Captured', `Screen + Activity captured: ${activityData.activity_percentage}% active`, 'success');
         activityTracker.resetTracking();
         return;
         
         // If we get here, screen capture was successful, so return without page capture
-        console.log('🎉 Screen capture completed successfully, skipping page capture');
+        // console.log('🎉 Screen capture completed successfully, skipping page capture');
         return;
         
       } catch (screenError) {
-        console.log('❌ Screen capture failed:', screenError.message);
+        // console.log('❌ Screen capture failed:', screenError.message);
         
         // Reset permission if there was an error
         if (screenError.name === 'NotAllowedError') {
@@ -415,14 +452,14 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
           screenStream = null;
           showNotification('🚫 Permission Required', 'Please allow screen sharing and select "Entire Screen"', 'warning');
         } else {
-          console.log('⚠️ Screen capture error, will fallback to page capture:', screenError.message);
+          // console.log('⚠️ Screen capture error, will fallback to page capture:', screenError.message);
           showNotification('⚠️ Screen Issue', 'Screen capture failed. Using page capture.', 'warning');
         }
       }
     }
     
     // Fallback to page capture ONLY if screen capture completely failed
-    console.log('📄 Using page capture fallback...');
+    // console.log('📄 Using page capture fallback...');
     
     // Remove problematic images before capture to avoid CORS issues
     const storageBase = getStorageBase();
@@ -453,7 +490,7 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
         }
       });
     } catch (pageErr) {
-      console.log('⚠️ Page capture failed, generating placeholder:', pageErr?.message || pageErr);
+      // console.log('⚠️ Page capture failed, generating placeholder:', pageErr?.message || pageErr);
       const w = Math.max(800, window.innerWidth || 1280);
       const h = Math.max(450, window.innerHeight || 720);
       canvas = document.createElement('canvas');
@@ -509,28 +546,29 @@ const captureScreenshot = async (taskId, taskName, projectName, options = {}) =>
     formData.append('activity_end_time', activityData.activity_end_time);
     formData.append('minute_breakdown', JSON.stringify(activityData.minute_breakdown));
     await api.post(`/screenshots`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-    console.log(`📄 Page capture successful: ${filename}`);
+    // console.log(`📄 Page capture successful: ${filename}`);
     showNotification('📄 Page Captured', `Page + Activity captured: ${activityData.activity_percentage}% active`, 'info');
-    try {
-      const durationSeconds = Math.round((activityData.duration_minutes || 0) * 60);
-      await api.post('/activity-sessions', {
-        task_id: taskId,
-        app_name: 'browser',
-        window_title: document.title || '',
-        url: window.location?.href || '',
-        start_time: activityData.activity_start_time,
-        end_time: activityData.activity_end_time,
-        duration_seconds: durationSeconds,
-        keyboard_clicks: activityData.keyboard_clicks,
-        mouse_clicks: activityData.mouse_clicks,
-      });
-    } catch (e) {
-      console.log('⚠️ Failed to record activity session (page):', e?.message || e);
-    }
+    // DISABLED AS PER USER REQUEST
+    // try {
+    //   const durationSeconds = Math.round((activityData.duration_minutes || 0) * 60);
+    //   await api.post('/activity-sessions', {
+    //     task_id: taskId,
+    //     app_name: 'browser',
+    //     window_title: document.title || '',
+    //     url: window.location?.href || '',
+    //     start_time: activityData.activity_start_time,
+    //     end_time: activityData.activity_end_time,
+    //     duration_seconds: durationSeconds,
+    //     keyboard_clicks: activityData.keyboard_clicks,
+    //     mouse_clicks: activityData.mouse_clicks,
+    //   });
+    // } catch (e) {
+    //  console.log('⚠️ Failed to record activity session (page):', e?.message || e);
+    // }
     activityTracker.resetTracking();
     
   } catch (error) {
-    console.error('❌ Screenshot capture failed completely:', error);
+    // console.error('❌ Screenshot capture failed completely:', error);
     showNotification('❌ Capture Failed', 'All capture methods failed. Check console.', 'error');
   }
 };
@@ -625,13 +663,13 @@ export const startScreenshotting = async (taskId, taskName, projectName) => {
   
   isScreenshotting = true;
   
-  console.log(`🚀 Starting screenshot automation for Task ID: ${taskId}`);
+  // console.log(`🚀 Starting screenshot automation for Task ID: ${taskId}`);
   
   // Start activity tracking
   window.__ACTIVE_TASK_ID__ = taskId;
   window.__LAST_TASK_ID__ = taskId;
   activityTracker.startTracking();
-  console.log('📊 Activity tracking started');
+  // console.log('📊 Activity tracking started');
   try {
     window.postMessage({
       type: 'TM_SET_TRACK_TASK',
@@ -644,33 +682,60 @@ export const startScreenshotting = async (taskId, taskName, projectName) => {
     const stream = await getScreenPermission();
     startExternalActivityMonitor(stream);
   } catch (e) {
-    console.log('Screen permission not granted yet');
+    // console.log('Screen permission not granted yet');
   }
   
-  console.log('⏰ Scheduling screenshots: first at 1min, then every 10min');
-  const firstTimeout = setTimeout(() => {
-    if (!isScreenshotting) return;
-    console.log('📸 1-minute capture triggered');
-    captureScreenshot(taskId, taskName, projectName);
-    if (intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
+  // console.log('⏰ Scheduling screenshots: every 10min');
+  intervalId = setInterval(() => {
+    if (isScreenshotting) {
+      // console.log('📸 10-minute interval capture triggered');
+      captureScreenshot(taskId, taskName, projectName);
+      
+      // Also schedule 3 random captures within the next 10-minute window
+      // Clear any previous pending random timeouts for safety
+      timeoutIds.forEach(id => clearTimeout(id));
+      timeoutIds = [];
+      const windowMs = 10 * 60 * 1000;
+      const minOffset = 30 * 1000;     // start after 30s to avoid collision with interval tick
+      const maxOffset = windowMs - 30 * 1000; // end 30s before next tick
+      const minGapMs = 0;
+      const picks = generateRandomOffsets(minOffset, maxOffset, 3, minGapMs);
+      picks.forEach((delay) => {
+        const id = setTimeout(() => {
+          if (!isScreenshotting) return;
+          // console.log(`📸 Random capture at +${Math.round(delay/1000)}s`);
+          captureScreenshot(taskId, taskName, projectName);
+        }, delay);
+        timeoutIds.push(id);
+      });
     }
-    intervalId = setInterval(() => {
-      if (isScreenshotting) {
-        console.log('📸 10-minute interval capture triggered');
+  }, 10 * 60 * 1000);
+  
+  // Schedule random captures for the first window immediately
+  try {
+    timeoutIds.forEach(id => clearTimeout(id));
+    timeoutIds = [];
+    const windowMs = 10 * 60 * 1000;
+    const minOffset = 30 * 1000;
+    const maxOffset = windowMs - 30 * 1000;
+    const minGapMs = 0;
+    const picks = generateRandomOffsets(minOffset, maxOffset, 3, minGapMs);
+    picks.forEach((delay) => {
+      const id = setTimeout(() => {
+        if (!isScreenshotting) return;
+        // console.log(`📸 Random capture (initial window) at +${Math.round(delay/1000)}s`);
         captureScreenshot(taskId, taskName, projectName);
-      }
-    }, 10 * 60 * 1000);
-  }, 60 * 1000);
-  timeoutIds.push(firstTimeout);
+      }, delay);
+      timeoutIds.push(id);
+    });
+  } catch {}
 };
 
 export const captureNow = async (taskId, taskName, projectName, options = {}) => {
   try {
     await captureScreenshot(taskId, taskName, projectName, options);
   } catch (e) {
-    console.error('captureNow failed:', e);
+// console.error('captureNow failed:', e);
   }
 };
 
@@ -691,7 +756,7 @@ export const stopScreenshotting = () => {
   try {
     window.postMessage({ type: 'TM_STOP_TRACK_TASK' }, '*');
   } catch {}
-  console.log('📊 Activity tracking stopped');
+  // console.log('📊 Activity tracking stopped');
   if (externalMonitorId) {
     clearInterval(externalMonitorId);
     externalMonitorId = null;
@@ -711,7 +776,7 @@ export const releaseScreenPermission = () => {
   } catch {}
   hasScreenPermission = false;
   screenStream = null;
-  console.log('🔐 Screen permission released');
+  // console.log('🔐 Screen permission released');
 };
 
 export const getScreenshots = async (taskId) => {

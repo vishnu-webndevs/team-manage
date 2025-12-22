@@ -21,13 +21,12 @@ class ProjectController extends Controller
         // ]);
         $user = auth()->user();
 
-        // Admin and Project Manager can see all projects
+        // Admin and Project Manager can see all projects; team members see their teams' projects
         if ($user->hasRole('admin') || $user->hasRole('project_manager')) {
             $query = Project::query();
         } else {
-            // Assigned users should only see projects that have tasks assigned to them
-            $taskProjectIds = Task::where('assigned_to', $user->id)->pluck('project_id');
-            $query = Project::whereIn('id', $taskProjectIds);
+            $teamIds = \App\Models\TeamMember::where('user_id', $user->id)->pluck('team_id');
+            $query = Project::whereIn('team_id', $teamIds);
         }
 
         // Optional filter by project_id for consistency
@@ -77,11 +76,9 @@ class ProjectController extends Controller
         if ($user->hasRole('admin') || $user->hasRole('project_manager')) {
             return response()->json($project->load('team', 'owner', 'tasks', 'timeTracks'));
         }
-        $hasAssignedTask = Task::where('project_id', $project->id)
-            ->where('assigned_to', $user->id)
-            ->exists();
-        if (!$hasAssignedTask) {
-            return response()->json(['message' => 'Unauthorized. Only assigned users can view this project.'], 403);
+        $isTeamMember = \App\Models\TeamMember::where('team_id', $project->team_id)->where('user_id', $user->id)->exists();
+        if (!$isTeamMember) {
+            return response()->json(['message' => 'Unauthorized. Only team members can view this project.'], 403);
         }
         return response()->json($project->load('team', 'owner', 'tasks', 'timeTracks'));
     }

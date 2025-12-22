@@ -24,11 +24,14 @@ export const Tasks = () => {
         title: '',
         description: '',
         assigned_to: '',
+        assigned_to_multi: [],
         priority: 'medium',
         estimated_hours: '',
         time_reset_policy: 'fixed',
         due_date: '',
     });
+    const [assigneeSearch, setAssigneeSearch] = useState('');
+    const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
     
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -57,13 +60,13 @@ export const Tasks = () => {
         const sig = JSON.stringify(filters);
         const now = Date.now();
         if (lastFetchRef.current && lastFetchRef.current.sig === sig && (now - lastFetchRef.current.at) < 1000) {
-            console.log('[Tasks] Skipping duplicate fetch due to StrictMode', filters);
+            // console.log('[Tasks] Skipping duplicate fetch due to StrictMode', filters);
             return;
         }
         lastFetchRef.current = { sig, at: now };
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
-            console.log('[Tasks] Filters changed, fetching projects/teams/tasks', filters);
+            // console.log('[Tasks] Filters changed, fetching projects/teams/tasks', filters);
             fetchProjects();
             fetchTeams();
             fetchTasks();
@@ -72,19 +75,19 @@ export const Tasks = () => {
     }, [filters]);
 
     const fetchProjects = async () => {
-        console.log('[Tasks] Fetching projects...');
+        // console.log('[Tasks] Fetching projects...');
         // Projects GET /projects se fetch ho rahe hain
         try {
             const response = await projectService.getProjects();
-            console.log('[Tasks] Projects fetched', response.data?.data?.length || 0);
+            // console.log('[Tasks] Projects fetched', response.data?.data?.length || 0);
             setProjects(response.data.data);
         } catch (error) {
-            console.error('Failed to fetch projects', error);
+            // console.error('Failed to fetch projects', error);
         }
     };
 
     const fetchTeams = async () => {
-        console.log('[Tasks] Fetching teams...');
+      //  console.log('[Tasks] Fetching teams...');
         // Teams GET /teams se aati hain; members ko flatten karke unique list banate hain
         try {
             const response = await teamService.getTeams();
@@ -98,28 +101,28 @@ export const Tasks = () => {
                     uniqueMembers.push(m);
                 }
             }
-            console.log('[Tasks] Teams fetched', teamsData.length, 'members', uniqueMembers.length);
+          //  console.log('[Tasks] Teams fetched', teamsData.length, 'members', uniqueMembers.length);
             setMembers(uniqueMembers);
         } catch (error) {
-            console.error('Failed to fetch teams', error);
+            // console.error('Failed to fetch teams', error);
         }
     };
 
     const fetchTasks = async () => {
-        console.log('[Tasks] Fetching tasks with filters', filters);
+      //  console.log('[Tasks] Fetching tasks with filters', filters);
         // Tasks GET /tasks se fetch hoti hain; filters query params me jaate hain
         try {
             const response = await taskService.getTasks(filters);
-            console.log('[Tasks] Tasks fetched', response.data?.data?.length || 0);
+          //  console.log('[Tasks] Tasks fetched', response.data?.data?.length || 0);
             setTasks(response.data.data);
         } catch (error) {
-            console.error('Failed to fetch tasks', error);
+            // console.error('Failed to fetch tasks', error);
         }
     };
 
     useEffect(() => {
         const loadTracked = async () => {
-            console.log('[Tasks] Loading tracked summaries...');
+            // console.log('[Tasks] Loading tracked summaries...');
             const map = {};
             let list = tasks.slice(0, 20);
             if (isAdminOrPM()) {
@@ -138,7 +141,7 @@ export const Tasks = () => {
             });
             await Promise.allSettled(workers);
             setAssigneeTracked(map);
-            console.log('[Tasks] Tracked map ready', map);
+            // console.log('[Tasks] Tracked map ready', map);
         };
         loadTracked();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,12 +290,22 @@ export const Tasks = () => {
         setError('');
 
         try {
-            await taskService.createTask(formData);
+            const selected = Array.isArray(formData.assigned_to_multi) ? formData.assigned_to_multi : [];
+            if (selected.length > 0) {
+                for (const uid of selected) {
+                    const payload = { ...formData, assigned_to: uid };
+                    await taskService.createTask(payload);
+                }
+            } else {
+                const payload = { ...formData, assigned_to: '' };
+                await taskService.createTask(payload);
+            }
             setFormData({
                 project_id: '',
                 title: '',
                 description: '',
                 assigned_to: '',
+                assigned_to_multi: [],
                 priority: 'medium',
                 estimated_hours: '',
                 time_reset_policy: 'fixed',
@@ -404,16 +417,91 @@ export const Tasks = () => {
 
                                 {isAdminOrPM() && (
                                     <div className="form-group">
-                                        <label>Assign to Employee</label>
-                                        <select
-                                            value={formData.assigned_to}
-                                            onChange={(e) => setFormData({ ...formData, assigned_to: e.target.value })}
-                                        >
-                                            <option value="">Unassigned</option>
-                                            {members.map((member) => (
-                                                <option key={member.id} value={member.id}>{member.name}</option>
-                                            ))}
-                                        </select>
+                                        <label>Assign to Employees</label>
+                                        <div className="multi-select-dropdown">
+                                            <button
+                                                type="button"
+                                                className="dropdown-toggle"
+                                                onClick={() => setAssigneeDropdownOpen(!assigneeDropdownOpen)}
+                                            >
+                                                {(() => {
+                                                    const selected = (formData.assigned_to_multi || []).map(id => {
+                                                        const m = (members || []).find(mm => String(mm.id) === String(id));
+                                                        return m ? m.name : id;
+                                                    });
+                                                    if (selected.length === 0) return 'Select employees';
+                                                    const show = selected.slice(0, 3);
+                                                    const more = selected.length - show.length;
+                                                    return (
+                                                        <span className="chips-inline">
+                                                            {show.map((name, idx) => {
+                                                                const parts = String(name || '').trim().split(/\s+/);
+                                                                const initials = parts.slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
+                                                                return (
+                                                                    <span key={idx} className="chip">
+                                                                        <span className="chip-avatar">{initials}</span>
+                                                                        <span className="chip-label">{name}</span>
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                            {more > 0 && <span className="chip chip-more">+{more}</span>}
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </button>
+                                            {assigneeDropdownOpen && (
+                                                <div className="dropdown-menu" onMouseDown={(e) => e.preventDefault()}>
+                                                   
+                                                    <div className="multi-select-grid">
+                                                        {(members || [])
+                                                            .filter(m => String(m.name || '').toLowerCase().includes(assigneeSearch.toLowerCase()))
+                                                            .map(member => {
+                                                                const idStr = String(member.id);
+                                                                const checked = formData.assigned_to_multi.includes(idStr);
+                                                                return (
+                                                                    <label key={member.id} className={`multi-option ${checked ? 'selected' : ''}`}>
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={checked}
+                                                                            onChange={(e) => {
+                                                                                const next = new Set(formData.assigned_to_multi);
+                                                                                if (e.target.checked) next.add(idStr); else next.delete(idStr);
+                                                                                setFormData({ ...formData, assigned_to_multi: Array.from(next) });
+                                                                            }}
+                                                                        />
+                                                                        <span className="multi-option-name">{member.name}</span>
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                    </div>
+                                                     <div className="multi-select-actions">
+                                                        {/* <input
+                                                            type="text"
+                                                            placeholder="Search members..."
+                                                            value={assigneeSearch}
+                                                            onChange={(e) => setAssigneeSearch(e.target.value)}
+                                                        /> */}
+                                                        <div className="multi-select-meta">
+                                                            <span>Selected: {formData.assigned_to_multi.length}</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const filtered = (members || []).filter(m => String(m.name || '').toLowerCase().includes(assigneeSearch.toLowerCase()));
+                                                                    const allIds = filtered.map(m => String(m.id));
+                                                                    setFormData({ ...formData, assigned_to_multi: allIds });
+                                                                }}
+                                                            >
+                                                                Select All
+                                                            </button>
+                                                            <button type="button" onClick={() => setFormData({ ...formData, assigned_to_multi: [] })}>
+                                                                Clear
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="hint-text">Select multiple users from the dropdown</div>
                                     </div>
                                 )}
 

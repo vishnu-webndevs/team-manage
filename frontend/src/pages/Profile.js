@@ -13,6 +13,8 @@ const Profile = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changing, setChanging] = useState(false);
   const [changeMsg, setChangeMsg] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState('');
 
   useEffect(() => {
     setName(user?.name || '');
@@ -54,6 +56,23 @@ const Profile = () => {
       setChangeMsg(msg);
     } finally {
       setChanging(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const ok = window.confirm('Delete your account? This action cannot be undone.');
+    if (!ok) return;
+    setDeleting(true);
+    setDeleteMsg('');
+    try {
+      await authService.deleteMe();
+      localStorage.removeItem('token');
+      window.location.href = '/login';
+    } catch (error) {
+      const msg = error?.response?.data?.message || 'Delete failed';
+      setDeleteMsg(msg);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -142,6 +161,26 @@ const Profile = () => {
             </div>
             {changeMsg && <div className={changeMsg.includes('failed') ? 'error-message' : 'success-message'}>{changeMsg}</div>}
           </form>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 24, borderColor: '#fca5a5' }}>
+        <div className="card-body">
+          <div className="section-title" style={{ color: '#b91c1c' }}>Permanent account delete</div>
+          <p style={{ color: '#6b7280' }}>
+            Deleting your account will remove your access immediately.
+          </p>
+          <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+            <button
+              className="btn-stop"
+              type="button"
+              onClick={handleDeleteAccount}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting...' : 'Delete Account'}
+            </button>
+          </div>
+          {deleteMsg && <div className={deleteMsg.includes('failed') ? 'error-message' : 'success-message'}>{deleteMsg}</div>}
         </div>
       </div>
     </div>

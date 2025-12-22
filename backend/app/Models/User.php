@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Models\TeamMember;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
@@ -114,5 +115,20 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->roles()->whereHas('permissions', function ($query) use ($permission) {
             $query->where('name', $permission);
         })->exists();
+    }
+
+    public function teamRole($teamId)
+    {
+        return TeamMember::where('team_id', $teamId)->where('user_id', $this->id)->value('role');
+    }
+
+    public function isTeamMemberOf($teamId)
+    {
+        return TeamMember::where('team_id', $teamId)->where('user_id', $this->id)->exists();
+    }
+
+    public function isTeamAdminOf($teamId)
+    {
+        return TeamMember::where('team_id', $teamId)->where('user_id', $this->id)->where('role', 'admin')->exists();
     }
 }

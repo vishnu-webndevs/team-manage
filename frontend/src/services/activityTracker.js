@@ -30,6 +30,7 @@ class ActivityTracker {
     this.sessionTitle = '';
     this.sessionKeyboard = 0;
     this.sessionMouse = 0;
+    this.lastKeyTime = 0;
 
     // Session Management
     this.lastSessionPostTs = 0;
@@ -39,6 +40,17 @@ class ActivityTracker {
     this.lastFlushedStart = null; // ISO string of last flushed segment start
     this.lastStateChangeTs = 0; // throttle visibility/blur-driven flushes
     
+    // Cross-tab tracking
+    this.broadcastChannel = new BroadcastChannel('team_manage_activity');
+    this.overrideUrl = null;
+    this.overrideTitle = null;
+    this.lastBroadcastTime = 0;
+    
+    // Bind methods
+    this.handleBroadcastMessage = this.handleBroadcastMessage.bind(this);
+    this.reportPresence = this.reportPresence.bind(this);
+    this.enableReportingOnly = this.enableReportingOnly.bind(this);
+
     // Debounce for clicks
     this.lastClickTime = 0;
   }
@@ -80,8 +92,8 @@ class ActivityTracker {
       this.checkActivity();
     }, 5000); // Check every 5 seconds
     
-    console.log('🎯 Enhanced global activity tracking started');
-    console.log('📡 Tracking across all tabs, windows, and applications');
+    // console.log('🎯 Enhanced global activity tracking started');
+    // console.log('📡 Tracking across all tabs, windows, and applications');
     
     // Initialize session tracking
     this.sessionStart = new Date();
@@ -89,6 +101,9 @@ class ActivityTracker {
     this.sessionTitle = document?.title || '';
     this.sessionKeyboard = 0;
     this.sessionMouse = 0;
+    
+    // Listen for cross-tab activity
+    this.broadcastChannel.addEventListener('message', this.handleBroadcastMessage);
   }
   
   async stopTracking() {
@@ -109,14 +124,17 @@ class ActivityTracker {
     window.removeEventListener('blur', this.handleBlur, true);
     document.removeEventListener('wheel', this.handleWheel, { capture: true });
     
+    // Remove cross-tab listener
+    this.broadcastChannel.removeEventListener('message', this.handleBroadcastMessage);
+    
     // Clear activity check interval
     if (this.activityCheckInterval) {
       clearInterval(this.activityCheckInterval);
       this.activityCheckInterval = null;
     }
     
-    console.log('🛑 Enhanced activity tracking stopped');
-    console.log('📊 Per-minute data:', this.getMinuteBreakdown());
+    // console.log('🛑 Enhanced activity tracking stopped');
+    // console.log('📊 Per-minute data:', this.getMinuteBreakdown());
     
     // Force flush final session
     await this.safePostSession({ __force: true });
@@ -124,6 +142,87 @@ class ActivityTracker {
     this.sessionStart = null;
     this.sessionKeyboard = 0;
     this.sessionMouse = 0;
+  }
+
+  enableReportingOnly() {
+    // This mode is for tabs that are NOT the main tracker but should report their activity
+    if (this.isTracking) return; 
+    
+    // Prevent duplicate listeners/intervals
+    if (this.isReporting) return;
+    this.isReporting = true;
+
+    // Listen for visibility and focus to report presence
+    document.addEventListener('visibilitychange', this.reportPresence);
+    window.addEventListener('focus', this.reportPresence);
+    
+    // Also report immediately if visible
+    if (!document.hidden) {
+      this.reportPresence();
+    }
+    
+    // Send heartbeat every 3 seconds while visible
+    setInterval(() => {
+      if (!document.hidden) {
+        this.reportPresence();
+      }
+    }, 3000);
+  }
+
+  reportPresence() {
+    if (document.hidden) return;
+    
+    try {
+      this.broadcastChannel.postMessage({
+        type: 'ACTIVITY_UPDATE',
+        url: window.location.href,
+        title: document.title
+      });
+    } catch (e) {
+      // console.error('Broadcast failed', e);
+    }
+  }
+
+  async handleBroadcastMessage(event) {
+    if (!this.isTracking) return;
+    
+    const { type, url, title } = event.data;
+    
+    if (type === 'ACTIVITY_UPDATE') {
+      // We received a signal that the user is active on another tab in this app
+      this.lastBroadcastTime = Date.now();
+      
+      // If we are hidden (or even if not, but the other tab is claiming focus),
+      // we trust the broadcast if it's recent.
+      // But typically we only care if we (tracker tab) are hidden.
+      if (document.hidden) {
+        const oldUrl = this.sessionUrl;
+        const oldTitle = this.sessionTitle;
+        
+        this.overrideUrl = url;
+        this.overrideTitle = title;
+        
+        // If URL changed significantly, we need to segment.
+        if (oldUrl !== url || oldTitle !== title) {
+           // Ensure we post the OLD session with the OLD url
+           this.sessionUrl = oldUrl;
+           this.sessionTitle = oldTitle;
+           await this.safePostSession({ __force: true });
+           // safePostSession will reset sessionUrl to overrideUrl (new) automatically
+        } else {
+           // No change, just ensure state is sync
+           this.sessionUrl = url;
+           this.sessionTitle = title;
+        }
+        
+        // Update current minute data immediately
+        const md = this.minuteData.get(this.currentMinute);
+        if (md) {
+          md.url = url;
+          md.title = title;
+        }
+      }
+    }
   }
 
   // Unified Session Posting Logic
@@ -166,11 +265,12 @@ class ActivityTracker {
         // Remove internal flags from payload before sending
         delete data.__force;
 
-        await api.post('/activity-sessions', data);
-        console.log('🪟 Session segment recorded:', data.window_title);
+        // DISABLED AS PER USER REQUEST - Do not store sessions in DB
+        // await api.post('/activity-sessions', data);
+        // console.log('🪟 Session segment recorded (SKIPPED POST):', data.window_title);
       }
     } catch (e) {
-      console.log('⚠️ Failed to flush session:', e?.message || e);
+      // console.log('⚠️ Failed to flush session:', e?.message || e);
     } finally {
       try {
         this.lastFlushedStart = this.sessionStart ? this.sessionStart.toISOString() : null;
@@ -186,11 +286,16 @@ class ActivityTracker {
     
     // Update title/url for the next segment
     if (document.hidden) {
-      this.sessionUrl = 'System/External';
-      this.sessionTitle = 'External Activity / Other App';
+      if (this.overrideUrl) {
+        this.sessionUrl = this.overrideUrl;
+        this.sessionTitle = this.overrideTitle;
+      } else {
+        this.sessionUrl = 'System/External';
+        this.sessionTitle = 'External Activity / Other App';
+      }
     } else {
-      this.sessionUrl = window.location?.href || '';
-      this.sessionTitle = document?.title || '';
+      this.sessionUrl = this.overrideUrl || window.location?.href || '';
+      this.sessionTitle = this.overrideTitle || document?.title || '';
     }
   }
   
@@ -212,7 +317,7 @@ class ActivityTracker {
             frame.document.addEventListener('wheel', this.handleWheel, { capture: true, passive: true });
           }
         } catch (e) {
-          console.log('⚠️ Cannot access frame (cross-origin):', e.message);
+          // console.log('⚠️ Cannot access frame (cross-origin):', e.message);
         }
       }
       
@@ -235,7 +340,7 @@ class ActivityTracker {
                   }
                 });
               } catch (e) {
-                console.log('⚠️ Cannot access iframe:', e.message);
+                // console.log('⚠️ Cannot access iframe:', e.message);
               }
             }
           });
@@ -245,7 +350,7 @@ class ActivityTracker {
       observer.observe(document.body, { childList: true, subtree: true });
       
     } catch (error) {
-      console.log('⚠️ Error setting up global listeners:', error.message);
+      // console.log('⚠️ Error setting up global listeners:', error.message);
     }
   }
   
@@ -258,9 +363,12 @@ class ActivityTracker {
       await this.safePostSession({ __force: true });
       // Next session starts as External (handled by safePostSession logic)
     } else {
-      // Tab visible -> End session segment (was External)
+      // Tab visible -> End session segment (was External or Remote Tab)
       await this.safePostSession({ __force: true });
       
+      this.overrideUrl = null;
+      this.overrideTitle = null;
+
       this.lastActivity = Date.now();
       // Next session starts as Browser
       this.sessionUrl = window.location?.href || '';
@@ -286,6 +394,21 @@ class ActivityTracker {
     if (!this.isTracking) return;
     
     const now = Date.now();
+    
+    // Check for stale override (no broadcast for 5 seconds)
+    if (this.overrideUrl && (now - this.lastBroadcastTime > 5000)) {
+      // console.log('⚠️ Override stale, reverting to external');
+      this.overrideUrl = null;
+      this.overrideTitle = null;
+      
+      // If we are still hidden, revert to System/External
+      if (document.hidden) {
+         this.sessionUrl = 'System/External';
+         this.sessionTitle = 'External Activity / Other App';
+         this.safePostSession({ __force: true });
+      }
+    }
+
     // We do NOT periodically flush here anymore for "Chrome History" style,
     // unless the cooldown is met (which is 10 mins).
     // The safePostSession call below handles the cooldown check.
@@ -297,7 +420,7 @@ class ActivityTracker {
     
     // Show current activity stats
     const currentStats = this.getFormattedStats();
-    console.log(`📊 Activity Stats: ${currentStats.keyboardClicksPerMinute}/min keys, ${currentStats.mouseClicksPerMinute}/min clicks, ${currentStats.activityLevel}`);
+  //  console.log(`📊 Activity Stats: ${currentStats.keyboardClicksPerMinute}/min keys, ${currentStats.mouseClicksPerMinute}/min clicks, ${currentStats.activityLevel}`);
   }
   
   getCurrentMinuteKey() {
@@ -337,21 +460,21 @@ class ActivityTracker {
     if (newMinute !== this.currentMinute) {
       this.currentMinute = newMinute;
       this.initializeMinute(this.currentMinute);
-      console.log(`⏰ Switched to minute: ${this.currentMinute}`);
+      // console.log(`⏰ Switched to minute: ${this.currentMinute}`);
     }
     // Always keep url/title up to date for the current minute
     const md = this.minuteData.get(this.currentMinute);
     if (md) {
-      md.url = window.location?.href || md.url || '';
-      md.title = document?.title || md.title || '';
+      md.url = this.overrideUrl || window.location?.href || md.url || '';
+      md.title = this.overrideTitle || document?.title || md.title || '';
     }
     
     // Check for URL/Title change -> Force Session Segment
-    const currentUrl = window.location?.href || '';
-    const currentTitle = document?.title || '';
+    const currentUrl = this.overrideUrl || window.location?.href || '';
+    const currentTitle = this.overrideTitle || document?.title || '';
     
     if (this.sessionStart && (currentUrl !== this.sessionUrl || currentTitle !== this.sessionTitle)) {
-      console.log('🪟 URL/Title changed, forcing session segment...');
+      // console.log('🪟 URL/Title changed, forcing session segment...');
       // Update internal state first so the post uses the OLD url/title for the OLD segment
       // Actually, safePostSession uses this.sessionUrl/Title which are currently the OLD ones.
       // After posting, it resets them to current.
@@ -369,6 +492,7 @@ class ActivityTracker {
     
     this.keyboardClicks++;
     this.sessionKeyboard++;
+    this.lastKeyTime = Date.now();
     const minuteData = this.minuteData.get(this.currentMinute);
     if (minuteData) {
       minuteData.keyboard++;
@@ -376,7 +500,7 @@ class ActivityTracker {
       minuteData.title = document?.title || minuteData.title || '';
     }
     
-    console.log(`⌨️ Key pressed: "${event.key}" (Total: ${this.keyboardClicks})`);
+    // console.log(`⌨️ Key pressed: "${event.key}" (Total: ${this.keyboardClicks})`);
   }
   
   handleMouseClick(event) {
@@ -404,7 +528,7 @@ class ActivityTracker {
       minuteData.title = document?.title || minuteData.title || '';
     }
     
-    console.log(`🖱️ Mouse event: ${event.type} (Total: ${this.mouseClicks})`);
+    // console.log(`🖱️ Mouse event: ${event.type} (Total: ${this.mouseClicks})`);
   }
   
   handleMouseMove(event) {
@@ -423,7 +547,7 @@ class ActivityTracker {
       this.lastMouseMove = now;
       
       if (this.mouseMoveCount % 50 === 0) {
-        console.log(`🖱️ Mouse movements: ${this.mouseMoveCount}`);
+        // console.log(`🖱️ Mouse movements: ${this.mouseMoveCount}`);
       }
     }
   }
@@ -463,15 +587,18 @@ class ActivityTracker {
   
   recordExternalTyping() {
     if (!this.isTracking) return;
+    const now = Date.now();
+    if (now - this.lastClickTime < 300) return;
+    if (now - this.lastMouseMove < 150) return;
     this.updateCurrentMinute();
-    this.lastActivity = Date.now();
+    this.lastActivity = now;
     this.keyboardClicks++;
     this.sessionKeyboard++;
     const md = this.minuteData.get(this.currentMinute);
     if (md) {
       md.keyboard++;
-      md.url = window.location?.href || md.url || '';
-      md.title = document?.title || md.title || '';
+      md.url = this.overrideUrl || window.location?.href || md.url || '';
+      md.title = this.overrideTitle || document?.title || md.title || '';
     }
   }
   
@@ -488,11 +615,8 @@ class ActivityTracker {
     }
     
     const minuteBreakdown = this.getMinuteBreakdown();
-    const maxMinutesFloor = Math.max(0, Math.floor(durationMinutes));
-    const targetCount = maxMinutesFloor > 0 ? maxMinutesFloor : (minuteBreakdown.length > 0 ? 1 : 0);
-    const boundedBreakdown = targetCount > 0 && minuteBreakdown.length > targetCount
-      ? minuteBreakdown.slice(minuteBreakdown.length - targetCount)
-      : minuteBreakdown;
+    // Return all collected breakdown data regardless of duration calculation
+    const boundedBreakdown = minuteBreakdown;
     
     return {
       keyboard_clicks: this.keyboardClicks,

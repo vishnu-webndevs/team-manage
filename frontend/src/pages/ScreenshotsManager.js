@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getAllScreenshots, getUserScreenshots, deleteScreenshot } from '../services/screenshotService';
 import { taskService, authService } from '../services';
 import api, { getStorageUrl } from '../services/api';
@@ -33,7 +34,7 @@ const ScreenshotsManager = () => {
         setIsAdmin(isAdminOrManager);
         setUserRole(isAdminOrManager ? 'admin' : 'employee');
       } catch (error) {
-        console.error('Error checking user role:', error);
+        // console.error('Error checking user role:', error);
         setUserRole('employee');
         setIsAdmin(false);
       }
@@ -63,7 +64,7 @@ const ScreenshotsManager = () => {
       setTasks(tasksRes.data.data || []);
       setUsers(usersRes.data.data || []);
     } catch (error) {
-      console.error('Error loading supporting data:', error);
+      // console.error('Error loading supporting data:', error);
       setTasks([]);
       setUsers([]);
     }
@@ -86,7 +87,7 @@ const ScreenshotsManager = () => {
       setCurrentPage(response.current_page || 1);
       setTotalPages(response.last_page || 1);
     } catch (error) {
-      console.error('Error loading screenshots:', error);
+      // console.error('Error loading screenshots:', error);
       setScreenshots([]);
     } finally {
       setLoading(false);
@@ -126,7 +127,7 @@ const ScreenshotsManager = () => {
       closeModal();
       loadScreenshots(); 
     } catch (error) {
-      console.error('Failed to delete screenshot:', error);
+      // console.error('Failed to delete screenshot:', error);
       alert('Failed to delete screenshot');
     }
   };
@@ -340,7 +341,7 @@ const ScreenshotsManager = () => {
     if (!showModal || !selectedScreenshot) return null;
     const totals = computeTotals(selectedScreenshot);
 
-    return (
+    return createPortal(
       <div className="modal-overlay" onClick={closeModal}>
         <div className="modal-content" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
@@ -416,29 +417,45 @@ const ScreenshotsManager = () => {
                 <div className="minute-breakdown-section">
                   <h4 className="breakdown-title">📊 Per-Minute Activity Breakdown</h4>
                   <div className="minute-breakdown-grid">
-                    {selectedScreenshot.minute_breakdown.map((minute, index) => (
-                      <div key={index} className="minute-card">
-                        <div className="minute-time">🕐 {minute.time}</div>
-                        <div className="minute-stats">
-                          <div className="stat-item">
-                            <span className="stat-icon">⌨️</span>
-                            <span className="stat-value">{minute.keyboard_clicks}</span>
-                          </div>
-                          <div className="stat-item">
-                            <span className="stat-icon">🖱️</span>
-                            <span className="stat-value">{minute.mouse_clicks}</span>
-                          </div>
-                          <div className="stat-item">
-                            <span className="stat-icon">🌀</span>
-                            <span className="stat-value">{minute.mouse_movements || 0}</span>
-                          </div>
-                          <div className="stat-item">
-                            <span className="stat-icon">📈</span>
-                            <span className="stat-value">{minute.total_activity}</span>
+                    {selectedScreenshot.minute_breakdown.map((minute, index) => {
+                      // Use timestamp if available for correct local time rendering
+                      let timeLabel = `${minute.time}:00 - ${minute.time}:59`;
+                      try {
+                        if (minute.timestamp) {
+                          const date = new Date(minute.timestamp);
+                          const startStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                          const endDate = new Date(date);
+                          endDate.setSeconds(59);
+                          endDate.setMilliseconds(0);
+                          const endStr = endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                          timeLabel = `${startStr} - ${endStr}`;
+                        }
+                      } catch (e) {}
+
+                      return (
+                        <div key={index} className="minute-card">
+                          <div className="minute-time">🕐 {timeLabel}</div>
+                          <div className="minute-stats">
+                            <div className="stat-item">
+                              <span className="stat-icon">⌨️</span>
+                              <span className="stat-value">{minute.keyboard_clicks}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-icon">🖱️</span>
+                              <span className="stat-value">{minute.mouse_clicks}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-icon">🌀</span>
+                              <span className="stat-value">{minute.mouse_movements || 0}</span>
+                            </div>
+                            <div className="stat-item">
+                              <span className="stat-icon">📈</span>
+                              <span className="stat-value">{minute.total_activity}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}</div>
+                      );
+                    })}</div>
                 </div>
               )}
             </div>
@@ -465,7 +482,8 @@ const ScreenshotsManager = () => {
             </div>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   };
 

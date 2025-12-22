@@ -9,7 +9,10 @@ use Illuminate\Support\Facades\Hash;
 use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
-use Illuminate\Foundation\Auth\EmailVerificationRequest;
+// use Illuminate\Foundation\Auth\EmailVerificationRequest;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use App\Models\Task;
 
 class AuthController extends Controller
 {
@@ -209,6 +212,30 @@ class AuthController extends Controller
         $user->password = Hash::make($validated['new_password']);
         $user->save();
         return response()->json(['message' => 'Password changed successfully']);
+    }
+
+    public function deleteMe(Request $request)
+    {
+        $user = $request->user();
+        DB::beginTransaction();
+        try {
+            $user->tokens()->delete();
+            try { $user->roles()->detach(); } catch (\Throwable $e) {}
+            try { $user->teams()->detach(); } catch (\Throwable $e) {}
+            try { Task::where('assigned_to', $user->id)->update(['assigned_to' => null]); } catch (\Throwable $e) {}
+            $user->name = 'Deleted User';
+            $user->email = 'deleted-' . $user->id . '@local.invalid';
+            $user->password = Hash::make(Str::random(32));
+            $user->google_id = null;
+            $user->avatar = null;
+            $user->bio = null;
+            $user->save();
+            DB::commit();
+            return response()->json(['message' => 'Account deleted'], 200);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Failed to delete account', 'error' => $e->getMessage()], 500);
+        }
     }
 
     public function getAllUsers(Request $request)
